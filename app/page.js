@@ -12,7 +12,6 @@ export default function Home() {
       const { data, error } = await supabase
         .from('pois')
         .select('id, name, slug, tagline, category, county, nearest_highway, admission, visit_duration, fun_fact')
-        .eq('published', true)
         .order('name')
 
       if (error) {
@@ -201,3 +200,4 @@ export default function Home() {
     </main>
   )
 }
+
