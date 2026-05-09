@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import MapView from '../../components/MapView';
 import { getCategoryColor, getCategoryEmoji } from '../../lib/categoryColors';
-
+import { toSlug } from '../../lib/slug'; 
 export default function ExplorePage() {
   const [pois, setPois] = useState([]);
   const [filteredPois, setFilteredPois] = useState([]);
@@ -334,9 +334,26 @@ function PoiCard({ poi, isSelected, onClick }) {
         <div style={{ fontSize: '13px', color: '#777', lineHeight: 1.4 }}>{poi.tagline}</div>
       )}
 
-      <div style={{ display: 'flex', gap: '12px', marginTop: '8px', fontSize: '12px', color: '#999' }}>
-        {poi.visit_duration && <span>⏱ {poi.visit_duration}</span>}
-        {poi.admission && <span>🎟 {poi.admission}</span>}
+       <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginTop: '8px',
+      }}>
+        <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: '#999' }}>
+          {poi.visit_duration && <span>⏱ {poi.visit_duration}</span>}
+          {poi.admission && <span>🎟 {poi.admission}</span>}
+        </div>
+        <a
+          href={`/poi/${poi.slug || toSlug(poi.name)}`}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            fontSize: '12px',
+            fontWeight: 600,
+            color: color,
+            textDecoration: 'none',
+          }}
+        >View Details →</a>
       </div>
     </div>
   );

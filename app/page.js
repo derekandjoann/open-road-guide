@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase';
 import MapView from '../components/MapView';
 import MapLegend from '../components/MapLegend';
 import { getCategoryColor, getCategoryEmoji } from '../lib/categoryColors';
+import { toSlug } from '../lib/slug';
+
 
 export default function HomePage() {
   const [pois, setPois] = useState([]);
@@ -338,13 +340,15 @@ export default function HomePage() {
                 const label = poi.category
                   ? poi.category.charAt(0).toUpperCase() + poi.category.slice(1)
                   : 'Place';
-                return (
-                  <div key={poi.id} style={{
-                    background: '#faf9f7', borderRadius: '14px', padding: '24px',
-                    border: '1.5px solid #e8e6e1',
-                    display: 'flex', flexDirection: 'column', gap: '8px',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                
+                 const poiSlug = poi.slug || toSlug(poi.name);
+                  return(
+                    <a key={poi.id} href={'/poi/${poiSlug}'} style={{
+                      background: '#faf9f7', borderRadius: '14px', padding: '24px',
+                      border: '1.5px solid #e8e6e1',
+                      display: 'flex', flexDirection: 'column', gap: '8px',
+                    textDecoration: 'none', color: 'inherit',
+                    }}><div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span style={{
                         width: '10px', height: '10px', borderRadius: '50%', background: color,
                       }} />
@@ -373,7 +377,7 @@ export default function HomePage() {
                       {poi.visit_duration && <span>⏱ {poi.visit_duration}</span>}
                       {poi.admission && <span>🎟 {poi.admission}</span>}
                     </div>
-                  </div>
+                  </a>
                 );
               })}
             </div>
