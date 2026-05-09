@@ -343,7 +343,7 @@ export default function HomePage() {
                 
                  const poiSlug = poi.slug || toSlug(poi.name);
                   return(
-                    <a key={poi.id} href={'/poi/${poiSlug}'} style={{
+                    <a key={poi.id} href={`/poi/${poiSlug}`} style={{
                       background: '#faf9f7', borderRadius: '14px', padding: '24px',
                       border: '1.5px solid #e8e6e1',
                       display: 'flex', flexDirection: 'column', gap: '8px',
