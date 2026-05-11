@@ -22,16 +22,12 @@ const toSlug = (s) =>
 // Open Road Guide brand palette mapped to category slugs.
 // Edit this map once you know your exact tag_categories.slug values.
 const CATEGORY_COLORS = {
-  activity: '#FF6B6B',
-  landscape: '#4ECDC4',
-  season: '#FFD93D',
-  experience: '#9D4EDD',
-  accessibility: '#06A77D',
-  travel: '#F77F00',
-  history: '#7B5E57',
-  culture: '#E63946',
-  food: '#F4A261',
-  difficulty: '#5C7AEA',
+  theme:     '#9D4EDD', // violet — storytelling, narrative threads (pioneer history, mining, etc.)
+  geology:   '#7B5E57', // earthy brown — rock, formations, slot canyons
+  activity:  '#FF6B6B', // coral — what you do there (hiking, scenic drive, photography)
+  season:    '#FFD93D', // sunny yellow — when to go
+  vibe:      '#4ECDC4', // teal — the feel (remote, family-friendly, romantic)
+  practical: '#06A77D', // green — logistics (paid-entry, accessible, monsoon-aware)
 };
 
 const FALLBACK_PALETTE = ['#FF6B6B', '#4ECDC4', '#FFD93D', '#9D4EDD', '#F77F00', '#06A77D'];
