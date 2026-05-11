@@ -7,37 +7,95 @@ import { getCategoryColor, getCategoryEmoji } from '../../../lib/categoryColors'
 import { toSlug } from '../../../lib/slug';
 import MapView from '../../../components/MapView';
 
+// Colors for tag pills, keyed by tag_category slug.
+// These match the Open Road Guide palette (coral, teal, yellow, violet) with a few extras.
+const CATEGORY_COLORS = {
+  theme:     { bg: '#fef0ed', border: '#ff6b5b', text: '#c43d2d' }, // coral
+  geology:   { bg: '#fdf4e3', border: '#d4a017', text: '#8a6508' }, // sandstone gold
+  activity:  { bg: '#e6f4f4', border: '#2ba6a4', text: '#0f5957' }, // teal
+  season:    { bg: '#fef7e0', border: '#ffb627', text: '#946600' }, // sunny yellow
+  vibe:      { bg: '#f0ebf7', border: '#7b5fb8', text: '#4a3680' }, // violet
+  practical: { bg: '#eef0f3', border: '#5a6577', text: '#2e3744' }, // slate
+};
+
+function getTagColors(categorySlug) {
+  return CATEGORY_COLORS[categorySlug] || CATEGORY_COLORS.practical;
+}
+
 export default function PoiDetailPage() {
   const params = useParams();
   const slug = params.slug;
 
   const [poi, setPoi] = useState(null);
+  const [tags, setTags] = useState([]);
   const [relatedPois, setRelatedPois] = useState([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
+  // ---------- Update browser tab title + meta description for SEO ----------
   useEffect(() => {
-    async function fetchPoi() {
+    if (!poi) return;
+    const title = `${poi.name} | Open Road Guide`;
+    document.title = title;
+
+    const desc =
+      poi.meta_description ||
+      poi.tagline ||
+      (poi.description ? poi.description.slice(0, 155) : `Visit ${poi.name} on your Utah road trip.`);
+
+    let metaDesc = document.querySelector('meta[name="description"]');
+    if (!metaDesc) {
+      metaDesc = document.createElement('meta');
+      metaDesc.setAttribute('name', 'description');
+      document.head.appendChild(metaDesc);
+    }
+    metaDesc.setAttribute('content', desc);
+
+    // Open Graph for nicer link previews when shared
+    const setOg = (property, content) => {
+      let el = document.querySelector(`meta[property="${property}"]`);
+      if (!el) {
+        el = document.createElement('meta');
+        el.setAttribute('property', property);
+        document.head.appendChild(el);
+      }
+      el.setAttribute('content', content);
+    };
+    setOg('og:title', title);
+    setOg('og:description', desc);
+    setOg('og:type', 'article');
+  }, [poi]);
+
+  // ---------- Fetch POI, its tags, and related POIs ----------
+  useEffect(() => {
+    async function fetchEverything() {
       setLoading(true);
       setNotFound(false);
 
-      let { data, error } = await supabase
+      // 1. Try to fetch the POI directly by its database slug first (fast path).
+      let { data: matchByDbSlug, error: dbSlugErr } = await supabase
         .from('pois')
-        .select('*');
+        .select('*')
+        .eq('slug', slug)
+        .maybeSingle();
 
-      if (error) {
-        console.error('Error fetching POIs:', error);
-        setLoading(false);
-        setNotFound(true);
-        return;
-      }
+      let match = matchByDbSlug;
 
-      let match = null;
-      if (data) {
-        match = data.find(p => {
-          if (p.slug && p.slug === slug) return true;
-          return toSlug(p.name) === slug;
-        });
+      // 2. Fallback: if not found, scan all POIs and match by generated slug from name.
+      //    This keeps old links working in case any POI doesn't have a slug column value yet.
+      if (!match) {
+        const { data: allPois, error: allErr } = await supabase
+          .from('pois')
+          .select('*');
+
+        if (allErr) {
+          console.error('Error fetching POIs:', allErr);
+          setNotFound(true);
+          setLoading(false);
+          return;
+        }
+
+        match = allPois?.find(p => toSlug(p.name) === slug);
       }
 
       if (!match) {
@@ -48,17 +106,84 @@ export default function PoiDetailPage() {
 
       setPoi(match);
 
-      const related = data
-        .filter(p => p.category === match.category && p.id !== match.id)
-        .slice(0, 4);
-      setRelatedPois(related);
+      // 3. Fetch tags for this POI, joined with tag_categories so we can color them.
+      const { data: poiTagRows, error: tagsErr } = await supabase
+        .from('poi_tags')
+        .select(`
+          tag:tags (
+            id,
+            slug,
+            name,
+            description,
+            category:tag_categories ( slug, name )
+          )
+        `)
+        .eq('poi_id', match.id);
+
+      if (tagsErr) {
+        console.warn('Could not load tags:', tagsErr);
+      }
+
+      const myTags = (poiTagRows || [])
+        .map(row => row.tag)
+        .filter(Boolean);
+      setTags(myTags);
+
+      // 4. Find related POIs by shared tags. Most-overlap wins.
+      const myTagIds = myTags.map(t => t.id);
+
+      if (myTagIds.length > 0) {
+        // Get every poi_tag row for any of my tags, excluding this POI itself.
+        const { data: sharedRows } = await supabase
+          .from('poi_tags')
+          .select('poi_id, tag_id')
+          .in('tag_id', myTagIds)
+          .neq('poi_id', match.id);
+
+        // Tally overlap counts per POI
+        const overlap = {};
+        (sharedRows || []).forEach(r => {
+          overlap[r.poi_id] = (overlap[r.poi_id] || 0) + 1;
+        });
+
+        // Sort POIs by shared-tag count, take the top 4
+        const topPoiIds = Object.entries(overlap)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 4)
+          .map(([id]) => id);
+
+        if (topPoiIds.length > 0) {
+          const { data: relatedData } = await supabase
+            .from('pois')
+            .select('id, name, slug, category, tagline')
+            .in('id', topPoiIds);
+
+          // Preserve the sort order from overlap counts
+          const ordered = topPoiIds
+            .map(id => relatedData?.find(p => p.id === id))
+            .filter(Boolean);
+          setRelatedPois(ordered);
+        } else {
+          setRelatedPois([]);
+        }
+      } else {
+        // No tags assigned yet → fall back to same-category POIs so the section isn't empty.
+        const { data: sameCategory } = await supabase
+          .from('pois')
+          .select('id, name, slug, category, tagline')
+          .eq('category', match.category)
+          .neq('id', match.id)
+          .limit(4);
+        setRelatedPois(sameCategory || []);
+      }
 
       setLoading(false);
     }
 
-    if (slug) fetchPoi();
+    if (slug) fetchEverything();
   }, [slug]);
 
+  // ---------- Loading state ----------
   if (loading) {
     return (
       <div style={{
@@ -70,12 +195,14 @@ export default function PoiDetailPage() {
         fontSize: '20px',
         color: '#888',
         background: '#f8f7f4',
+        padding: '20px',
       }}>
         Loading...
       </div>
     );
   }
 
+  // ---------- Not found state ----------
   if (notFound) {
     return (
       <div style={{
@@ -86,13 +213,13 @@ export default function PoiDetailPage() {
         justifyContent: 'center',
         fontFamily: "'Outfit', sans-serif",
         background: '#f8f7f4',
-        padding: '40px',
+        padding: '40px 20px',
         textAlign: 'center',
       }}>
         <div style={{ fontSize: '48px', marginBottom: '16px' }}>🏜️</div>
         <h1 style={{
           fontFamily: "'Fraunces', serif",
-          fontSize: '28px',
+          fontSize: 'clamp(24px, 5vw, 28px)',
           fontWeight: 800,
           color: '#1a1a2e',
           marginBottom: '8px',
@@ -115,6 +242,7 @@ export default function PoiDetailPage() {
     );
   }
 
+  // ---------- Main render ----------
   const color = getCategoryColor(poi.category);
   const emoji = getCategoryEmoji(poi.category);
   const categoryLabel = poi.category
@@ -129,17 +257,20 @@ export default function PoiDetailPage() {
       minHeight: '100vh',
     }}>
 
+      {/* Top nav */}
       <nav style={{
         background: '#1a1a2e',
-        padding: '16px 28px',
+        padding: '14px 20px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '10px',
       }}>
         <a href="/" style={{
           textDecoration: 'none',
           fontFamily: "'Fraunces', serif",
-          fontSize: '20px',
+          fontSize: 'clamp(17px, 4vw, 20px)',
           fontWeight: 800,
           color: '#ff6b5b',
         }}>Open Road Guide</a>
@@ -153,12 +284,16 @@ export default function PoiDetailPage() {
         </div>
       </nav>
 
+      {/* Breadcrumb */}
       <div style={{
-        padding: '14px 28px',
+        padding: '12px 20px',
         background: '#fff',
         borderBottom: '1px solid #e8e6e1',
         fontSize: '13px',
         color: '#999',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
       }}>
         <a href="/" style={{ color: '#999', textDecoration: 'none' }}>Home</a>
         {' / '}
@@ -167,9 +302,10 @@ export default function PoiDetailPage() {
         <span style={{ color: '#1a1a2e', fontWeight: 600 }}>{poi.name}</span>
       </div>
 
+      {/* Hero */}
       <section style={{
         background: 'linear-gradient(145deg, #1a1a2e 0%, #16213e 60%, #0f3460 100%)',
-        padding: '60px 28px 70px',
+        padding: 'clamp(40px, 8vw, 60px) 20px clamp(50px, 9vw, 70px)',
         position: 'relative',
         overflow: 'hidden',
       }}>
@@ -212,7 +348,7 @@ export default function PoiDetailPage() {
 
           <h1 style={{
             fontFamily: "'Fraunces', serif",
-            fontSize: 'clamp(32px, 5vw, 52px)',
+            fontSize: 'clamp(28px, 6vw, 52px)',
             fontWeight: 900,
             color: '#fff',
             lineHeight: 1.1,
@@ -221,17 +357,55 @@ export default function PoiDetailPage() {
 
           {poi.tagline && (
             <p style={{
-              fontSize: 'clamp(16px, 2.5vw, 20px)',
-              color: 'rgba(255,255,255,0.6)',
+              fontSize: 'clamp(15px, 2.5vw, 20px)',
+              color: 'rgba(255,255,255,0.7)',
               lineHeight: 1.5,
               maxWidth: '600px',
+              marginBottom: tags.length > 0 ? '24px' : '0',
             }}>{poi.tagline}</p>
           )}
 
+          {/* Tag pills */}
+          {tags.length > 0 && (
+            <div style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '8px',
+              marginTop: poi.tagline ? '0' : '20px',
+            }}>
+              {tags.map(tag => {
+                const tagCategorySlug = tag.category?.slug || 'practical';
+                const colors = getTagColors(tagCategorySlug);
+                return (
+                  <a
+                    key={tag.id}
+                    href={`/tag/${tag.slug}`}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      padding: '6px 14px',
+                      background: colors.bg,
+                      color: colors.text,
+                      border: `1px solid ${colors.border}60`,
+                      borderRadius: '20px',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {tag.name}
+                  </a>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Info chips */}
           <div style={{
             display: 'flex',
-            gap: '12px',
-            marginTop: '28px',
+            gap: '10px',
+            marginTop: '24px',
             flexWrap: 'wrap',
           }}>
             {poi.visit_duration && (
@@ -247,17 +421,18 @@ export default function PoiDetailPage() {
         </div>
       </section>
 
+      {/* Body content */}
       <div style={{
         maxWidth: '900px',
         margin: '0 auto',
-        padding: '0 28px',
+        padding: '0 20px',
       }}>
 
         {poi.fun_fact && (
           <div style={{
             background: '#fff',
             borderRadius: '14px',
-            padding: '24px 28px',
+            padding: 'clamp(18px, 4vw, 24px) clamp(20px, 4vw, 28px)',
             marginTop: '-30px',
             position: 'relative',
             zIndex: 3,
@@ -298,7 +473,7 @@ export default function PoiDetailPage() {
           <section style={{ marginTop: '40px' }}>
             <h2 style={{
               fontFamily: "'Fraunces', serif",
-              fontSize: '24px',
+              fontSize: 'clamp(22px, 4.5vw, 24px)',
               fontWeight: 800,
               color: '#1a1a2e',
               marginBottom: '16px',
@@ -315,7 +490,7 @@ export default function PoiDetailPage() {
         <section style={{ marginTop: '40px' }}>
           <h2 style={{
             fontFamily: "'Fraunces', serif",
-            fontSize: '24px',
+            fontSize: 'clamp(22px, 4.5vw, 24px)',
             fontWeight: 800,
             color: '#1a1a2e',
             marginBottom: '16px',
@@ -323,8 +498,8 @@ export default function PoiDetailPage() {
 
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-            gap: '14px',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+            gap: '12px',
           }}>
             {poi.visit_duration && (
               <InfoCard icon="⏱" label="Time Needed" value={poi.visit_duration} />
@@ -350,7 +525,7 @@ export default function PoiDetailPage() {
         <section style={{ marginTop: '40px' }}>
           <h2 style={{
             fontFamily: "'Fraunces', serif",
-            fontSize: '24px',
+            fontSize: 'clamp(22px, 4.5vw, 24px)',
             fontWeight: 800,
             color: '#1a1a2e',
             marginBottom: '16px',
@@ -373,16 +548,25 @@ export default function PoiDetailPage() {
           <section style={{ marginTop: '48px', marginBottom: '60px' }}>
             <h2 style={{
               fontFamily: "'Fraunces', serif",
-              fontSize: '24px',
+              fontSize: 'clamp(22px, 4.5vw, 24px)',
               fontWeight: 800,
               color: '#1a1a2e',
-              marginBottom: '16px',
-            }}>More {categoryLabel} Stops</h2>
+              marginBottom: '6px',
+            }}>{tags.length > 0 ? 'Related Stops' : `More ${categoryLabel} Stops`}</h2>
+            <p style={{
+              fontSize: '14px',
+              color: '#888',
+              marginBottom: '18px',
+            }}>
+              {tags.length > 0
+                ? 'Places that share the most in common with this one'
+                : `Other ${categoryLabel.toLowerCase()} stops on the route`}
+            </p>
 
             <div style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-              gap: '16px',
+              gap: '14px',
             }}>
               {relatedPois.map((rp) => {
                 const rpColor = getCategoryColor(rp.category);
@@ -394,7 +578,7 @@ export default function PoiDetailPage() {
                     style={{
                       background: '#fff',
                       borderRadius: '12px',
-                      padding: '20px',
+                      padding: '18px',
                       textDecoration: 'none',
                       border: '1.5px solid #e8e6e1',
                       display: 'flex',
@@ -444,7 +628,7 @@ export default function PoiDetailPage() {
 
       <footer style={{
         background: '#1a1a2e',
-        padding: '40px 28px',
+        padding: '40px 20px',
         textAlign: 'center',
       }}>
         <div style={{
@@ -500,7 +684,7 @@ function InfoCard({ icon, label, value }) {
     <div style={{
       background: '#fff',
       borderRadius: '12px',
-      padding: '18px',
+      padding: '16px',
       border: '1.5px solid #e8e6e1',
       display: 'flex',
       alignItems: 'flex-start',
@@ -511,7 +695,7 @@ function InfoCard({ icon, label, value }) {
         flexShrink: 0,
         marginTop: '2px',
       }}>{icon}</span>
-      <div>
+      <div style={{ minWidth: 0 }}>
         <div style={{
           fontSize: '11px',
           fontWeight: 600,
@@ -525,9 +709,9 @@ function InfoCard({ icon, label, value }) {
           fontWeight: 600,
           color: '#1a1a2e',
           lineHeight: 1.4,
+          wordBreak: 'break-word',
         }}>{value}</div>
       </div>
     </div>
   );
 }
-
