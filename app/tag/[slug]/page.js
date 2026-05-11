@@ -10,7 +10,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
-// Fallback slugifier (matches the one used on the POI page)
+// Fallback slugifier
 const toSlug = (s) =>
   s
     ?.toLowerCase()
@@ -19,8 +19,33 @@ const toSlug = (s) =>
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-') || '';
 
-// Build a human-readable intro paragraph for SEO.
-// Uses tag description from DB if present, otherwise generates from the data we have.
+// Open Road Guide brand palette mapped to category slugs.
+// Edit this map once you know your exact tag_categories.slug values.
+const CATEGORY_COLORS = {
+  activity: '#FF6B6B',
+  landscape: '#4ECDC4',
+  season: '#FFD93D',
+  experience: '#9D4EDD',
+  accessibility: '#06A77D',
+  travel: '#F77F00',
+  history: '#7B5E57',
+  culture: '#E63946',
+  food: '#F4A261',
+  difficulty: '#5C7AEA',
+};
+
+const FALLBACK_PALETTE = ['#FF6B6B', '#4ECDC4', '#FFD93D', '#9D4EDD', '#F77F00', '#06A77D'];
+
+function colorForCategory(categorySlug) {
+  if (!categorySlug) return '#FF6B6B';
+  if (CATEGORY_COLORS[categorySlug]) return CATEGORY_COLORS[categorySlug];
+  let hash = 0;
+  for (let i = 0; i < categorySlug.length; i++) {
+    hash = (hash * 31 + categorySlug.charCodeAt(i)) | 0;
+  }
+  return FALLBACK_PALETTE[Math.abs(hash) % FALLBACK_PALETTE.length];
+}
+
 function buildIntro(tag, poiCount, regions) {
   if (tag?.description && tag.description.length > 40) {
     return tag.description;
@@ -52,39 +77,25 @@ export default function TagPage() {
     async function load() {
       setLoading(true);
 
-      // 1. Fetch the tag by slug (with category)
       const { data: tagData, error: tagErr } = await supabase
         .from('tags')
-        .select('id, name, slug, description, tag_category:tag_categories(id, name, slug, color)')
+        .select('id, name, slug, description, category:tag_categories(id, name, slug)')
         .eq('slug', slug)
         .maybeSingle();
 
       if (tagErr || !tagData) {
-        // Fallback: try slugifying tag names if the slug column lookup misses
-        const { data: allTags } = await supabase
-          .from('tags')
-          .select('id, name, slug, description, tag_category:tag_categories(id, name, slug, color)');
-        const match = allTags?.find((t) => (t.slug || toSlug(t.name)) === slug);
-        if (!match) {
-          setNotFound(true);
-          setLoading(false);
-          return;
-        }
-        setTag(match);
-        setCategory(match.tag_category);
-        await loadPois(match.id);
+        setNotFound(true);
         setLoading(false);
         return;
       }
 
       setTag(tagData);
-      setCategory(tagData.tag_category);
+      setCategory(tagData.category);
       await loadPois(tagData.id);
       setLoading(false);
     }
 
     async function loadPois(tagId) {
-      // 2. Fetch all POIs that have this tag
       const { data: pairs } = await supabase
         .from('poi_tags')
         .select('poi:pois(id, name, slug, description, region, category)')
@@ -92,7 +103,6 @@ export default function TagPage() {
 
       const pois = (pairs || []).map((p) => p.poi).filter(Boolean);
 
-      // Group by region, sort regions alphabetically, POIs alphabetical inside each
       const grouped = {};
       pois.forEach((p) => {
         const region = p.region || 'Other';
@@ -104,12 +114,11 @@ export default function TagPage() {
       );
       setPoisByRegion(grouped);
 
-      // 3. Compute related tags: other tags most commonly co-occurring on these POIs
       if (pois.length) {
         const poiIds = pois.map((p) => p.id);
         const { data: coTags } = await supabase
           .from('poi_tags')
-          .select('tag:tags(id, name, slug, tag_category:tag_categories(slug, color))')
+          .select('tag:tags(id, name, slug, category:tag_categories(slug))')
           .in('poi_id', poiIds);
 
         const counts = {};
@@ -130,7 +139,6 @@ export default function TagPage() {
     load();
   }, [slug]);
 
-  // SEO: document.title, meta description, Open Graph (matches POI page pattern)
   useEffect(() => {
     if (!tag) return;
     const poiCount = Object.values(poisByRegion).reduce((n, arr) => n + arr.length, 0);
@@ -159,7 +167,6 @@ export default function TagPage() {
     setMeta('meta[property="og:description"]', 'content', desc);
     setMeta('meta[property="og:type"]', 'content', 'website');
 
-    // Canonical URL
     let canonical = document.querySelector('link[rel="canonical"]');
     if (!canonical) {
       canonical = document.createElement('link');
@@ -191,21 +198,19 @@ export default function TagPage() {
     );
   }
 
-  const accentColor = category?.color || '#FF6B6B'; // coral fallback
+  const accentColor = colorForCategory(category?.slug);
   const poiCount = Object.values(poisByRegion).reduce((n, arr) => n + arr.length, 0);
   const regionNames = Object.keys(poisByRegion).sort();
   const intro = buildIntro(tag, poiCount, regionNames);
 
   return (
     <main style={styles.main}>
-      {/* Breadcrumb */}
       <nav style={styles.breadcrumb}>
         <Link href="/" style={styles.crumbLink}>Home</Link>
         <span style={styles.crumbSep}>›</span>
         <span style={styles.crumbCurrent}>{tag.name}</span>
       </nav>
 
-      {/* Header */}
       <header style={styles.header}>
         {category && (
           <div style={{ ...styles.categoryLabel, color: accentColor }}>
@@ -221,12 +226,10 @@ export default function TagPage() {
         </div>
       </header>
 
-      {/* Intro paragraph (SEO) */}
       <section style={styles.intro}>
         <p style={styles.introText}>{intro}</p>
       </section>
 
-      {/* POIs grouped by region */}
       {poiCount === 0 ? (
         <section style={styles.empty}>
           <p>No destinations are tagged with &ldquo;{tag.name}&rdquo; yet. Check back soon.</p>
@@ -265,13 +268,12 @@ export default function TagPage() {
         ))
       )}
 
-      {/* Related tags footer */}
       {relatedTags.length > 0 && (
         <section style={styles.relatedSection}>
           <h2 style={styles.relatedTitle}>Related tags</h2>
           <div style={styles.relatedPills}>
             {relatedTags.map((t) => {
-              const color = t.tag_category?.color || '#4ECDC4';
+              const color = colorForCategory(t.category?.slug);
               return (
                 <Link
                   key={t.id}
@@ -301,26 +303,14 @@ const styles = {
     fontFamily: "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif",
     color: '#1a1a2e',
   },
-  loading: {
-    textAlign: 'center',
-    padding: '4rem 1rem',
-    fontSize: '1.1rem',
-    color: '#666',
-  },
-  notFound: {
-    textAlign: 'center',
-    padding: '4rem 1rem',
-  },
+  loading: { textAlign: 'center', padding: '4rem 1rem', fontSize: '1.1rem', color: '#666' },
+  notFound: { textAlign: 'center', padding: '4rem 1rem' },
   notFoundTitle: {
     fontFamily: "'Fraunces', Georgia, serif",
     fontSize: 'clamp(1.75rem, 5vw, 2.5rem)',
     marginBottom: '1rem',
   },
-  link: {
-    color: '#FF6B6B',
-    textDecoration: 'none',
-    fontWeight: 500,
-  },
+  link: { color: '#FF6B6B', textDecoration: 'none', fontWeight: 500 },
   breadcrumb: {
     fontSize: '0.9rem',
     color: '#666',
@@ -330,20 +320,10 @@ const styles = {
     gap: '0.5rem',
     alignItems: 'center',
   },
-  crumbLink: {
-    color: '#666',
-    textDecoration: 'none',
-  },
-  crumbSep: {
-    color: '#bbb',
-  },
-  crumbCurrent: {
-    color: '#1a1a2e',
-    fontWeight: 500,
-  },
-  header: {
-    marginBottom: '2rem',
-  },
+  crumbLink: { color: '#666', textDecoration: 'none' },
+  crumbSep: { color: '#bbb' },
+  crumbCurrent: { color: '#1a1a2e', fontWeight: 500 },
+  header: { marginBottom: '2rem' },
   categoryLabel: {
     fontSize: '0.85rem',
     fontWeight: 600,
@@ -361,11 +341,7 @@ const styles = {
     wordBreak: 'break-word',
     lineHeight: 1.1,
   },
-  count: {
-    fontSize: 'clamp(0.95rem, 2vw, 1.1rem)',
-    color: '#666',
-    fontWeight: 500,
-  },
+  count: { fontSize: 'clamp(0.95rem, 2vw, 1.1rem)', color: '#666', fontWeight: 500 },
   intro: {
     marginBottom: '3rem',
     padding: 'clamp(1rem, 3vw, 1.5rem)',
@@ -379,9 +355,7 @@ const styles = {
     lineHeight: 1.7,
     color: '#3a3a4e',
   },
-  regionSection: {
-    marginBottom: '3rem',
-  },
+  regionSection: { marginBottom: '3rem' },
   regionTitle: {
     fontFamily: "'Fraunces', Georgia, serif",
     fontSize: 'clamp(1.4rem, 4vw, 1.9rem)',
@@ -429,23 +403,9 @@ const styles = {
     fontWeight: 600,
     marginBottom: '0.5rem',
   },
-  poiDesc: {
-    fontSize: '0.95rem',
-    lineHeight: 1.55,
-    color: '#555',
-    margin: 0,
-  },
-  empty: {
-    padding: '3rem 1rem',
-    textAlign: 'center',
-    color: '#666',
-    fontSize: '1rem',
-  },
-  relatedSection: {
-    marginTop: '4rem',
-    paddingTop: '2rem',
-    borderTop: '1px solid #eee',
-  },
+  poiDesc: { fontSize: '0.95rem', lineHeight: 1.55, color: '#555', margin: 0 },
+  empty: { padding: '3rem 1rem', textAlign: 'center', color: '#666', fontSize: '1rem' },
+  relatedSection: { marginTop: '4rem', paddingTop: '2rem', borderTop: '1px solid #eee' },
   relatedTitle: {
     fontFamily: "'Fraunces', Georgia, serif",
     fontSize: 'clamp(1.2rem, 3vw, 1.5rem)',
@@ -453,11 +413,7 @@ const styles = {
     marginBottom: '1rem',
     color: '#1a1a2e',
   },
-  relatedPills: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '0.6rem',
-  },
+  relatedPills: { display: 'flex', flexWrap: 'wrap', gap: '0.6rem' },
   relatedPill: {
     display: 'inline-block',
     padding: '0.45rem 0.9rem',
