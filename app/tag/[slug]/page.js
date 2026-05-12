@@ -10,7 +10,6 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
-// Fallback slugifier
 const toSlug = (s) =>
   s
     ?.toLowerCase()
@@ -19,15 +18,14 @@ const toSlug = (s) =>
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-') || '';
 
-// Open Road Guide brand palette mapped to category slugs.
-// Edit this map once you know your exact tag_categories.slug values.
+// Open Road Guide brand palette mapped to your tag_categories.slug values
 const CATEGORY_COLORS = {
-  theme:     '#9D4EDD', // violet — storytelling, narrative threads (pioneer history, mining, etc.)
-  geology:   '#7B5E57', // earthy brown — rock, formations, slot canyons
-  activity:  '#FF6B6B', // coral — what you do there (hiking, scenic drive, photography)
-  season:    '#FFD93D', // sunny yellow — when to go
-  vibe:      '#4ECDC4', // teal — the feel (remote, family-friendly, romantic)
-  practical: '#06A77D', // green — logistics (paid-entry, accessible, monsoon-aware)
+  theme:     '#9D4EDD', // violet
+  geology:   '#7B5E57', // earthy brown
+  activity:  '#FF6B6B', // coral
+  season:    '#FFD93D', // sunny yellow
+  vibe:      '#4ECDC4', // teal
+  practical: '#06A77D', // green
 };
 
 const FALLBACK_PALETTE = ['#FF6B6B', '#4ECDC4', '#FFD93D', '#9D4EDD', '#F77F00', '#06A77D'];
@@ -42,18 +40,44 @@ function colorForCategory(categorySlug) {
   return FALLBACK_PALETTE[Math.abs(hash) % FALLBACK_PALETTE.length];
 }
 
-function buildIntro(tag, poiCount, regions) {
+// Normalize highway values so "Hwy 12" and "Highway 12" group together,
+// and stuff with no highway falls into "Other Roads"
+function normalizeHighway(raw) {
+  if (!raw || typeof raw !== 'string') return 'Other Roads';
+  const trimmed = raw.trim();
+  if (!trimmed) return 'Other Roads';
+  // Normalize common prefixes
+  return trimmed
+    .replace(/^hwy\.?\s+/i, 'Highway ')
+    .replace(/^highway\s+/i, 'Highway ')
+    .replace(/^us\s*-?\s*/i, 'US-')
+    .replace(/^i\s*-?\s*(\d)/i, 'I-$1')
+    .replace(/^sr\s*-?\s*/i, 'SR-')
+    .replace(/^utah\s+/i, 'Utah ');
+}
+
+// Sort highways: numbered Highway / US- / I- / SR- groups first by number,
+// "Other Roads" always last
+function highwaySortKey(name) {
+  if (name === 'Other Roads') return [9999, name];
+  const numMatch = name.match(/(\d+)/);
+  const num = numMatch ? parseInt(numMatch[1], 10) : 9000;
+  return [num, name];
+}
+
+function buildIntro(tag, poiCount, highways) {
   if (tag?.description && tag.description.length > 40) {
     return tag.description;
   }
-  const regionList =
-    regions.length > 3
-      ? `${regions.slice(0, 3).join(', ')}, and beyond`
-      : regions.join(' and ');
-  const regionPhrase = regions.length ? ` across ${regionList}` : '';
+  const realHighways = highways.filter((h) => h !== 'Other Roads');
+  const highwayList =
+    realHighways.length > 3
+      ? `${realHighways.slice(0, 3).join(', ')}, and more`
+      : realHighways.join(' and ');
+  const highwayPhrase = realHighways.length ? ` along ${highwayList}` : '';
   return `Discover ${poiCount} ${tag.name.toLowerCase()} ${
     poiCount === 1 ? 'destination' : 'destinations'
-  } in Utah${regionPhrase}. Open Road Guide curates each stop with local context, seasonal tips, and the stories behind the place — so you know not just where to go, but when to go and why it matters.`;
+  } in Utah${highwayPhrase}. Open Road Guide curates each stop with local context, seasonal tips, and the stories behind the place — so you know not just where to go, but when to go and why it matters.`;
 }
 
 export default function TagPage() {
@@ -62,7 +86,7 @@ export default function TagPage() {
 
   const [tag, setTag] = useState(null);
   const [category, setCategory] = useState(null);
-  const [poisByRegion, setPoisByRegion] = useState({});
+  const [poisByHighway, setPoisByHighway] = useState({});
   const [relatedTags, setRelatedTags] = useState([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -92,24 +116,30 @@ export default function TagPage() {
     }
 
     async function loadPois(tagId) {
+      // Only published POIs, only columns that actually exist on the pois table
       const { data: pairs } = await supabase
         .from('poi_tags')
-        .select('poi:pois(id, name, slug, description, region, category)')
+        .select('poi:pois(id, name, slug, tagline, description, nearest_highway, nearest_city, category, thumbnail_url, published)')
         .eq('tag_id', tagId);
 
-      const pois = (pairs || []).map((p) => p.poi).filter(Boolean);
+      const pois = (pairs || [])
+        .map((p) => p.poi)
+        .filter((p) => p && p.published !== false); // hide unpublished, allow null/true
 
+      // Group by normalized nearest_highway
       const grouped = {};
       pois.forEach((p) => {
-        const region = p.region || 'Other';
-        if (!grouped[region]) grouped[region] = [];
-        grouped[region].push(p);
+        const hwy = normalizeHighway(p.nearest_highway);
+        if (!grouped[hwy]) grouped[hwy] = [];
+        grouped[hwy].push(p);
       });
-      Object.keys(grouped).forEach((r) =>
-        grouped[r].sort((a, b) => a.name.localeCompare(b.name))
+      // Sort POIs within each highway alphabetically
+      Object.keys(grouped).forEach((h) =>
+        grouped[h].sort((a, b) => a.name.localeCompare(b.name))
       );
-      setPoisByRegion(grouped);
+      setPoisByHighway(grouped);
 
+      // Related tags: other tags co-occurring on these POIs
       if (pois.length) {
         const poiIds = pois.map((p) => p.id);
         const { data: coTags } = await supabase
@@ -137,7 +167,7 @@ export default function TagPage() {
 
   useEffect(() => {
     if (!tag) return;
-    const poiCount = Object.values(poisByRegion).reduce((n, arr) => n + arr.length, 0);
+    const poiCount = Object.values(poisByHighway).reduce((n, arr) => n + arr.length, 0);
     const title = `${tag.name} in Utah — ${poiCount} ${
       poiCount === 1 ? 'Place' : 'Places'
     } to Visit | Open Road Guide`;
@@ -170,7 +200,7 @@ export default function TagPage() {
       document.head.appendChild(canonical);
     }
     canonical.setAttribute('href', `https://openroadguide.com/tag/${slug}`);
-  }, [tag, poisByRegion, slug]);
+  }, [tag, poisByHighway, slug]);
 
   if (loading) {
     return (
@@ -195,9 +225,14 @@ export default function TagPage() {
   }
 
   const accentColor = colorForCategory(category?.slug);
-  const poiCount = Object.values(poisByRegion).reduce((n, arr) => n + arr.length, 0);
-  const regionNames = Object.keys(poisByRegion).sort();
-  const intro = buildIntro(tag, poiCount, regionNames);
+  const poiCount = Object.values(poisByHighway).reduce((n, arr) => n + arr.length, 0);
+  const highways = Object.keys(poisByHighway).sort((a, b) => {
+    const [na, sa] = highwaySortKey(a);
+    const [nb, sb] = highwaySortKey(b);
+    if (na !== nb) return na - nb;
+    return sa.localeCompare(sb);
+  });
+  const intro = buildIntro(tag, poiCount, highways);
 
   return (
     <main style={styles.main}>
@@ -218,7 +253,7 @@ export default function TagPage() {
         </h1>
         <div style={styles.count}>
           {poiCount} {poiCount === 1 ? 'destination' : 'destinations'}
-          {regionNames.length > 1 && ` across ${regionNames.length} regions`}
+          {highways.length > 1 && ` along ${highways.length} ${highways.length === 1 ? 'road' : 'roads'}`}
         </div>
       </header>
 
@@ -231,34 +266,35 @@ export default function TagPage() {
           <p>No destinations are tagged with &ldquo;{tag.name}&rdquo; yet. Check back soon.</p>
         </section>
       ) : (
-        regionNames.map((region) => (
-          <section key={region} style={styles.regionSection}>
+        highways.map((hwy) => (
+          <section key={hwy} style={styles.regionSection}>
             <h2 style={{ ...styles.regionTitle, color: accentColor }}>
-              {region}
+              {hwy}
               <span style={styles.regionCount}>
-                {poisByRegion[region].length}
+                {poisByHighway[hwy].length}
               </span>
             </h2>
             <div style={styles.poiGrid}>
-              {poisByRegion[region].map((poi) => (
-                <Link
-                  key={poi.id}
-                  href={`/poi/${poi.slug || toSlug(poi.name)}`}
-                  style={styles.poiCard}
-                >
-                  <h3 style={styles.poiName}>{poi.name}</h3>
-                  {poi.category && (
-                    <div style={styles.poiCategory}>{poi.category}</div>
-                  )}
-                  {poi.description && (
-                    <p style={styles.poiDesc}>
-                      {poi.description.length > 140
-                        ? poi.description.slice(0, 140).trim() + '…'
-                        : poi.description}
-                    </p>
-                  )}
-                </Link>
-              ))}
+              {poisByHighway[hwy].map((poi) => {
+                const preview =
+                  poi.tagline ||
+                  (poi.description && poi.description.length > 140
+                    ? poi.description.slice(0, 140).trim() + '…'
+                    : poi.description);
+                return (
+                  <Link
+                    key={poi.id}
+                    href={`/poi/${poi.slug || toSlug(poi.name)}`}
+                    style={styles.poiCard}
+                  >
+                    <h3 style={styles.poiName}>{poi.name}</h3>
+                    {poi.nearest_city && (
+                      <div style={styles.poiCity}>{poi.nearest_city}</div>
+                    )}
+                    {preview && <p style={styles.poiDesc}>{preview}</p>}
+                  </Link>
+                );
+              })}
             </div>
           </section>
         ))
@@ -391,7 +427,7 @@ const styles = {
     color: '#1a1a2e',
     wordBreak: 'break-word',
   },
-  poiCategory: {
+  poiCity: {
     fontSize: '0.8rem',
     color: '#4ECDC4',
     textTransform: 'uppercase',
