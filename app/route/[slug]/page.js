@@ -271,8 +271,7 @@ export default function RoutePage() {
       <section style={styles.closing}>
         <p style={styles.closingText}>
           That&apos;s the drive. Take your time, pull over often, and let{' '}
-          {route.name.split(' ')[0]} {route.name.split(' ')[1] || ''} do what it
-          does best.
+          {route.name} do what it does best.
         </p>
         <Link href="/" style={styles.closingLink}>
           ← Explore more of Open Road Guide
