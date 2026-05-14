@@ -161,8 +161,6 @@ export default function RoutePage() {
         </Link>
         <span style={styles.crumbSep}>›</span>
         <span>Routes</span>
-          Routes
-        </Link>
         <span style={styles.crumbSep}>›</span>
         <span style={styles.crumbCurrent}>{route.name}</span>
       </nav>
@@ -520,4 +518,4 @@ const styles = {
     fontWeight: 600,
     fontSize: '0.95rem',
   },
-};0
+};
