@@ -160,7 +160,9 @@ export default function RoutePage() {
           Home
         </Link>
         <span style={styles.crumbSep}>›</span>
-        <span>Routes</span>
+        <Link href="/routes" style={styles.crumbLink}>
+          Routes
+        </Link>
         <span style={styles.crumbSep}>›</span>
         <span style={styles.crumbCurrent}>{route.name}</span>
       </nav>
