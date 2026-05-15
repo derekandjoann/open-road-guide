@@ -153,10 +153,16 @@ export default function StoryPage() {
     );
   }
 
-  // Split body into paragraphs
-  const paragraphs = (story.body || '')
+  // Split body into blocks on blank lines. Each block becomes a heading or
+  // a paragraph based on its leading characters.
+  //   "## Foo"  -> section heading  (h2)
+  //   "### Bar" -> sub-heading       (h3)
+  //   anything else -> paragraph
+  // Stories without any markdown headings (like the original Boulder story)
+  // render exactly as before.
+  const blocks = (story.body || '')
     .split(/\n\n+/)
-    .map((p) => p.trim())
+    .map((b) => b.trim())
     .filter(Boolean);
 
   // Format published date if present
@@ -228,13 +234,30 @@ export default function StoryPage() {
       </header>
 
       {/* Body */}
-      {paragraphs.length > 0 && (
+      {blocks.length > 0 && (
         <article style={styles.bodyWrap}>
-          {paragraphs.map((p, i) => (
-            <p key={i} style={styles.bodyPara}>
-              {p}
-            </p>
-          ))}
+          {blocks.map((block, i) => {
+            // Order matters: check ### before ## (since ### also starts with ##)
+            if (block.startsWith('### ')) {
+              return (
+                <h3 key={i} style={styles.bodyH3}>
+                  {block.slice(4)}
+                </h3>
+              );
+            }
+            if (block.startsWith('## ')) {
+              return (
+                <h2 key={i} style={styles.bodyH2}>
+                  {block.slice(3)}
+                </h2>
+              );
+            }
+            return (
+              <p key={i} style={styles.bodyPara}>
+                {block}
+              </p>
+            );
+          })}
         </article>
       )}
 
@@ -412,6 +435,25 @@ const styles = {
     lineHeight: 1.8,
     color: '#222',
     margin: '0 0 1.5rem 0',
+  },
+  // Section heading inside body (## ...)
+  bodyH2: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: 'clamp(1.4rem, 3.5vw, 1.75rem)',
+    fontWeight: 600,
+    color: COLORS.ink,
+    margin: '2.5rem 0 1rem 0',
+    lineHeight: 1.25,
+  },
+  // Sub-heading inside body (### ...)
+  bodyH3: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: 'clamp(1.1rem, 2.5vw, 1.3rem)',
+    fontWeight: 500,
+    fontStyle: 'italic',
+    color: '#3a3a4e',
+    margin: '2rem 0 0.75rem 0',
+    lineHeight: 1.3,
   },
 
   // Related sections
