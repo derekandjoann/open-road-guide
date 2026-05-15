@@ -29,6 +29,7 @@ export default function PoiDetailPage() {
   const [poi, setPoi] = useState(null);
   const [tags, setTags] = useState([]);
   const [relatedPois, setRelatedPois] = useState([]);
+  const [stories, setStories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -66,7 +67,7 @@ export default function PoiDetailPage() {
     setOg('og:type', 'article');
   }, [poi]);
 
-  // ---------- Fetch POI, its tags, and related POIs ----------
+  // ---------- Fetch POI, its tags, related POIs, and related stories ----------
   useEffect(() => {
     async function fetchEverything() {
       setLoading(true);
@@ -129,7 +130,45 @@ export default function PoiDetailPage() {
         .filter(Boolean);
       setTags(myTags);
 
-      // 4. Find related POIs by shared tags. Most-overlap wins.
+      // 4. Fetch stories that feature this POI via the story_pois join table.
+      //    Only show published stories. Sorted by published_at desc (newest first),
+      //    falling back to created_at for stories without a published_at value.
+      const { data: storyRows, error: storiesErr } = await supabase
+        .from('story_pois')
+        .select(`
+          story:stories (
+            id,
+            slug,
+            title,
+            subtitle,
+            excerpt,
+            story_type,
+            hero_image_url,
+            hero_image_alt,
+            reading_time_minutes,
+            author_name,
+            published,
+            published_at,
+            created_at
+          )
+        `)
+        .eq('poi_id', match.id);
+
+      if (storiesErr) {
+        console.warn('Could not load stories:', storiesErr);
+      }
+
+      const myStories = (storyRows || [])
+        .map(row => row.story)
+        .filter(s => s && s.published) // only published stories
+        .sort((a, b) => {
+          const aDate = a.published_at || a.created_at;
+          const bDate = b.published_at || b.created_at;
+          return new Date(bDate) - new Date(aDate);
+        });
+      setStories(myStories);
+
+      // 5. Find related POIs by shared tags. Most-overlap wins.
       const myTagIds = myTags.map(t => t.id);
 
       if (myTagIds.length > 0) {
@@ -543,6 +582,151 @@ export default function PoiDetailPage() {
             />
           </div>
         </section>
+
+        {/* ---------- Stories Featuring This Place ---------- */}
+        {stories.length > 0 && (
+          <section style={{ marginTop: '48px' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              marginBottom: '6px',
+            }}>
+              <span style={{
+                display: 'inline-block',
+                width: '24px',
+                height: '3px',
+                background: '#ff6b5b',
+                borderRadius: '2px',
+              }} />
+              <span style={{
+                fontSize: '12px',
+                fontWeight: 700,
+                color: '#ff6b5b',
+                textTransform: 'uppercase',
+                letterSpacing: '1.5px',
+              }}>Stories</span>
+            </div>
+            <h2 style={{
+              fontFamily: "'Fraunces', serif",
+              fontSize: 'clamp(22px, 4.5vw, 24px)',
+              fontWeight: 800,
+              color: '#1a1a2e',
+              marginBottom: '6px',
+            }}>
+              {stories.length === 1 ? 'A story featuring this place' : 'Stories featuring this place'}
+            </h2>
+            <p style={{
+              fontSize: '14px',
+              color: '#888',
+              marginBottom: '18px',
+            }}>
+              Go deeper into the history and character of this stop
+            </p>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+              gap: '14px',
+            }}>
+              {stories.map((story) => (
+                <a
+                  key={story.id}
+                  href={`/story/${story.slug}`}
+                  style={{
+                    background: '#fff',
+                    borderRadius: '12px',
+                    overflow: 'hidden',
+                    textDecoration: 'none',
+                    border: '1.5px solid #e8e6e1',
+                    display: 'flex',
+                    flexDirection: 'row',
+                    alignItems: 'stretch',
+                    minHeight: '110px',
+                  }}
+                >
+                  {/* Image or coral fallback block */}
+                  {story.hero_image_url ? (
+                    <div style={{
+                      width: '110px',
+                      flexShrink: 0,
+                      background: `#f0ebe4 url(${story.hero_image_url}) center/cover no-repeat`,
+                    }}
+                    role="img"
+                    aria-label={story.hero_image_alt || story.title}
+                    />
+                  ) : (
+                    <div style={{
+                      width: '110px',
+                      flexShrink: 0,
+                      background: 'linear-gradient(135deg, #ff6b5b 0%, #ff8a7a 100%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '10px',
+                    }}>
+                      <span style={{
+                        fontFamily: "'Fraunces', serif",
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        color: '#fff',
+                        textTransform: 'uppercase',
+                        letterSpacing: '1.5px',
+                        textAlign: 'center',
+                        lineHeight: 1.3,
+                      }}>
+                        {story.story_type || 'Story'}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Card body */}
+                  <div style={{
+                    padding: '14px 16px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                    gap: '4px',
+                    minWidth: 0,
+                    flex: 1,
+                  }}>
+                    {story.story_type && story.hero_image_url && (
+                      <div style={{
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        color: '#ff6b5b',
+                        textTransform: 'uppercase',
+                        letterSpacing: '1px',
+                      }}>
+                        {story.story_type}
+                      </div>
+                    )}
+                    <div style={{
+                      fontFamily: "'Fraunces', serif",
+                      fontSize: '16px',
+                      fontWeight: 700,
+                      color: '#1a1a2e',
+                      lineHeight: 1.25,
+                    }}>
+                      {story.title}
+                    </div>
+                    <div style={{
+                      fontSize: '12px',
+                      color: '#888',
+                      marginTop: '2px',
+                    }}>
+                      {story.author_name && <span>{story.author_name}</span>}
+                      {story.author_name && story.reading_time_minutes ? ' · ' : ''}
+                      {story.reading_time_minutes && (
+                        <span>{story.reading_time_minutes} min read</span>
+                      )}
+                    </div>
+                  </div>
+                </a>
+              ))}
+            </div>
+          </section>
+        )}
 
         {relatedPois.length > 0 && (
           <section style={{ marginTop: '48px', marginBottom: '60px' }}>
