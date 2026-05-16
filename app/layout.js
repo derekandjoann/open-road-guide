@@ -1,4 +1,5 @@
 import './globals.css';
+import Nav from './components/Nav';
 
 export const metadata = {
   title: 'Open Road Guide — Discover Utah Road Trip Stops',
@@ -23,6 +24,7 @@ export default function RootLayout({ children }) {
         />
       </head>
       <body>
+        <Nav />
         {children}
       </body>
     </html>
