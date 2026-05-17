@@ -29,6 +29,55 @@ const COLORS = {
   warmGray: '#666',
 };
 
+// Parse inline [text](url) markdown links inside a text block.
+// Returns an array of strings and link elements suitable for {...} in JSX.
+// External URLs (http/https) become <a target="_blank">, internal paths (/...)
+// become Next.js <Link> for client-side navigation.
+const parseInlineLinks = (text) => {
+  const pattern = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const out = [];
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      out.push(text.slice(lastIndex, match.index));
+    }
+    const [, linkText, url] = match;
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      out.push(
+        <a
+          key={`l${key++}`}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: COLORS.coral, textDecoration: 'underline' }}
+        >
+          {linkText}
+        </a>
+      );
+    } else {
+      out.push(
+        <Link
+          key={`l${key++}`}
+          href={url}
+          style={{ color: COLORS.coral, textDecoration: 'underline' }}
+        >
+          {linkText}
+        </Link>
+      );
+    }
+    lastIndex = pattern.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    out.push(text.slice(lastIndex));
+  }
+
+  return out.length > 0 ? out : [text];
+};
+
 export default function StoryPage() {
   const params = useParams();
   const slug = params?.slug;
@@ -254,7 +303,7 @@ export default function StoryPage() {
             }
             return (
               <p key={i} style={styles.bodyPara}>
-                {block}
+                {parseInlineLinks(block)}
               </p>
             );
           })}
