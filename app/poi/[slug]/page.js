@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { getCategoryColor, getCategoryEmoji } from '../../../lib/categoryColors';
 import { toSlug } from '../../../lib/slug';
+import { parseInlineLinks } from '../../../lib/parseInlineLinks';
 import MapView from '../../../components/MapView';
 
 // Colors for tag pills, keyed by tag_category slug.
@@ -288,6 +289,16 @@ export default function PoiDetailPage() {
     ? poi.category.charAt(0).toUpperCase() + poi.category.slice(1)
     : 'Place';
 
+  // Split description into blocks for paragraph + heading rendering.
+  // Mirrors the story renderer's behavior:
+  //   "## Foo"  -> section heading (h2)
+  //   "### Bar" -> sub-heading (h3)
+  //   anything else -> paragraph with inline link parsing
+  const descriptionBlocks = (poi.description || '')
+    .split(/\n\n+/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+
   return (
     <div style={{
       fontFamily: "'Outfit', sans-serif",
@@ -416,7 +427,7 @@ export default function PoiDetailPage() {
                 const tagCategorySlug = tag.category?.slug || 'practical';
                 const colors = getTagColors(tagCategorySlug);
                 return (
-                  <a
+                  
                     key={tag.id}
                     href={`/tag/${tag.slug}`}
                     style={{
@@ -508,7 +519,7 @@ export default function PoiDetailPage() {
           </div>
         )}
 
-        {poi.description && (
+        {poi.description && descriptionBlocks.length > 0 && (
           <section style={{ marginTop: '40px' }}>
             <h2 style={{
               fontFamily: "'Fraunces', serif",
@@ -521,8 +532,51 @@ export default function PoiDetailPage() {
               fontSize: '16px',
               color: '#444',
               lineHeight: 1.8,
-              whiteSpace: 'pre-line',
-            }}>{poi.description}</div>
+            }}>
+              {descriptionBlocks.map((block, i) => {
+                // Order matters: check ### before ## (since ### also starts with ##)
+                if (block.startsWith('### ')) {
+                  return (
+                    <h3
+                      key={i}
+                      style={{
+                        fontFamily: "'Fraunces', serif",
+                        fontSize: 'clamp(17px, 3vw, 19px)',
+                        fontWeight: 500,
+                        fontStyle: 'italic',
+                        color: '#3a3a4e',
+                        margin: '24px 0 8px 0',
+                        lineHeight: 1.3,
+                      }}
+                    >
+                      {block.slice(4)}
+                    </h3>
+                  );
+                }
+                if (block.startsWith('## ')) {
+                  return (
+                    <h2
+                      key={i}
+                      style={{
+                        fontFamily: "'Fraunces', serif",
+                        fontSize: 'clamp(19px, 3.5vw, 22px)',
+                        fontWeight: 600,
+                        color: '#1a1a2e',
+                        margin: '32px 0 12px 0',
+                        lineHeight: 1.25,
+                      }}
+                    >
+                      {block.slice(3)}
+                    </h2>
+                  );
+                }
+                return (
+                  <p key={i} style={{ margin: '0 0 1.2em 0' }}>
+                    {parseInlineLinks(block)}
+                  </p>
+                );
+              })}
+            </div>
           </section>
         )}
 
@@ -630,7 +684,7 @@ export default function PoiDetailPage() {
               gap: '14px',
             }}>
               {stories.map((story) => (
-                <a
+                
                   key={story.id}
                   href={`/story/${story.slug}`}
                   style={{
@@ -756,7 +810,7 @@ export default function PoiDetailPage() {
                 const rpColor = getCategoryColor(rp.category);
                 const rpSlug = rp.slug || toSlug(rp.name);
                 return (
-                  <a
+                  
                     key={rp.id}
                     href={`/poi/${rpSlug}`}
                     style={{
