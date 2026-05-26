@@ -1,4 +1,4 @@
-'use client';
+app/poi/[slug]/page.js'use client';
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
