@@ -23,6 +23,14 @@ function getTagColors(categorySlug) {
   return CATEGORY_COLORS[categorySlug] || CATEGORY_COLORS.practical;
 }
 
+// Format a distance in miles for the Nearby cards: one decimal under 10 mi,
+// whole numbers above. e.g. 0.3 -> "0.3 mi away", 28.1 -> "28 mi away".
+function formatDistance(miles) {
+  if (miles == null) return null;
+  const n = miles < 10 ? Math.round(miles * 10) / 10 : Math.round(miles);
+  return `${n} mi away`;
+}
+
 export default function PoiDetailPage() {
   const params = useParams();
   const slug = params.slug;
@@ -30,6 +38,7 @@ export default function PoiDetailPage() {
   const [poi, setPoi] = useState(null);
   const [tags, setTags] = useState([]);
   const [relatedPois, setRelatedPois] = useState([]);
+  const [nearbyIsGeo, setNearbyIsGeo] = useState(false);
   const [stories, setStories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -169,52 +178,79 @@ export default function PoiDetailPage() {
         });
       setStories(myStories);
 
-      // 5. Find related POIs by shared tags. Most-overlap wins.
-      const myTagIds = myTags.map(t => t.id);
+      // 5. Find NEARBY POIs by geographic distance (primary path).
+      //    Calls the nearby_pois() Postgres function, which ranks all other
+      //    published POIs by great-circle distance from this one. Falls back to
+      //    the original theme-based logic (shared tags, then same category) only
+      //    when this POI has no coordinates or the lookup comes back empty.
+      let usedGeo = false;
 
-      if (myTagIds.length > 0) {
-        // Get every poi_tag row for any of my tags, excluding this POI itself.
-        const { data: sharedRows } = await supabase
-          .from('poi_tags')
-          .select('poi_id, tag_id')
-          .in('tag_id', myTagIds)
-          .neq('poi_id', match.id);
+      if (match.slug && match.latitude != null && match.longitude != null) {
+        const { data: nearbyData, error: nearbyErr } = await supabase
+          .rpc('nearby_pois', { target_slug: match.slug, max_results: 6 });
 
-        // Tally overlap counts per POI
-        const overlap = {};
-        (sharedRows || []).forEach(r => {
-          overlap[r.poi_id] = (overlap[r.poi_id] || 0) + 1;
-        });
+        if (nearbyErr) {
+          console.warn('Could not load nearby POIs:', nearbyErr);
+        } else if (nearbyData && nearbyData.length > 0) {
+          const withDistance = nearbyData.filter(p => p.distance_miles != null);
+          if (withDistance.length > 0) {
+            setRelatedPois(withDistance);
+            usedGeo = true;
+          }
+        }
+      }
 
-        // Sort POIs by shared-tag count, take the top 4
-        const topPoiIds = Object.entries(overlap)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 4)
-          .map(([id]) => id);
+      setNearbyIsGeo(usedGeo);
 
-        if (topPoiIds.length > 0) {
-          const { data: relatedData } = await supabase
+      if (!usedGeo) {
+        // ---- Fallback: original theme-based related stops ----
+        // Shared tags first (most-overlap wins), then same-category.
+        const myTagIds = myTags.map(t => t.id);
+
+        if (myTagIds.length > 0) {
+          // Get every poi_tag row for any of my tags, excluding this POI itself.
+          const { data: sharedRows } = await supabase
+            .from('poi_tags')
+            .select('poi_id, tag_id')
+            .in('tag_id', myTagIds)
+            .neq('poi_id', match.id);
+
+          // Tally overlap counts per POI
+          const overlap = {};
+          (sharedRows || []).forEach(r => {
+            overlap[r.poi_id] = (overlap[r.poi_id] || 0) + 1;
+          });
+
+          // Sort POIs by shared-tag count, take the top 4
+          const topPoiIds = Object.entries(overlap)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 4)
+            .map(([id]) => id);
+
+          if (topPoiIds.length > 0) {
+            const { data: relatedData } = await supabase
+              .from('pois')
+              .select('id, name, slug, category, tagline')
+              .in('id', topPoiIds);
+
+            // Preserve the sort order from overlap counts
+            const ordered = topPoiIds
+              .map(id => relatedData?.find(p => p.id === id))
+              .filter(Boolean);
+            setRelatedPois(ordered);
+          } else {
+            setRelatedPois([]);
+          }
+        } else {
+          // No tags assigned yet → fall back to same-category POIs so the section isn't empty.
+          const { data: sameCategory } = await supabase
             .from('pois')
             .select('id, name, slug, category, tagline')
-            .in('id', topPoiIds);
-
-          // Preserve the sort order from overlap counts
-          const ordered = topPoiIds
-            .map(id => relatedData?.find(p => p.id === id))
-            .filter(Boolean);
-          setRelatedPois(ordered);
-        } else {
-          setRelatedPois([]);
+            .eq('category', match.category)
+            .neq('id', match.id)
+            .limit(4);
+          setRelatedPois(sameCategory || []);
         }
-      } else {
-        // No tags assigned yet → fall back to same-category POIs so the section isn't empty.
-        const { data: sameCategory } = await supabase
-          .from('pois')
-          .select('id, name, slug, category, tagline')
-          .eq('category', match.category)
-          .neq('id', match.id)
-          .limit(4);
-        setRelatedPois(sameCategory || []);
       }
 
       setLoading(false);
@@ -790,15 +826,17 @@ export default function PoiDetailPage() {
               fontWeight: 800,
               color: '#1a1a2e',
               marginBottom: '6px',
-            }}>{tags.length > 0 ? 'Related Stops' : `More ${categoryLabel} Stops`}</h2>
+            }}>{nearbyIsGeo ? 'Nearby' : (tags.length > 0 ? 'Related Stops' : `More ${categoryLabel} Stops`)}</h2>
             <p style={{
               fontSize: '14px',
               color: '#888',
               marginBottom: '18px',
             }}>
-              {tags.length > 0
-                ? 'Places that share the most in common with this one'
-                : `Other ${categoryLabel.toLowerCase()} stops on the route`}
+              {nearbyIsGeo
+                ? 'The closest stops worth working into your route'
+                : tags.length > 0
+                  ? 'Places that share the most in common with this one'
+                  : `Other ${categoryLabel.toLowerCase()} stops on the route`}
             </p>
 
             <div style={{
@@ -809,9 +847,10 @@ export default function PoiDetailPage() {
               {relatedPois.map((rp) => {
                 const rpColor = getCategoryColor(rp.category);
                 const rpSlug = rp.slug || toSlug(rp.name);
+                const distanceLabel = formatDistance(rp.distance_miles);
                 return (
                   <a
-                    key={rp.id}
+                    key={rp.slug || rp.id}
                     href={`/poi/${rpSlug}`}
                     style={{
                       background: '#fff',
@@ -828,19 +867,37 @@ export default function PoiDetailPage() {
                       display: 'flex',
                       alignItems: 'center',
                       gap: '6px',
+                      justifyContent: 'space-between',
                     }}>
                       <span style={{
-                        width: '8px', height: '8px',
-                        borderRadius: '50%',
-                        background: rpColor,
-                      }} />
-                      <span style={{
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        color: rpColor,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.5px',
-                      }}>{rp.category}</span>
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        minWidth: 0,
+                      }}>
+                        <span style={{
+                          width: '8px', height: '8px',
+                          borderRadius: '50%',
+                          background: rpColor,
+                          flexShrink: 0,
+                        }} />
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          color: rpColor,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px',
+                        }}>{rp.category}</span>
+                      </span>
+                      {distanceLabel && (
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          color: '#aaa',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                        }}>{distanceLabel}</span>
+                      )}
                     </div>
                     <div style={{
                       fontFamily: "'Fraunces', serif",
