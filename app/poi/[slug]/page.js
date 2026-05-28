@@ -235,6 +235,7 @@ export default function PoiDetailPage() {
             const { data: relatedData } = await supabase
               .from('pois')
               .select('id, name, slug, category, tagline')
+              .eq('published', true)
               .in('id', topPoiIds);
 
             // Preserve the sort order from overlap counts
@@ -250,6 +251,7 @@ export default function PoiDetailPage() {
           const { data: sameCategory } = await supabase
             .from('pois')
             .select('id, name, slug, category, tagline')
+            .eq('published', true)
             .eq('category', match.category)
             .neq('id', match.id)
             .limit(4);
@@ -646,11 +648,8 @@ export default function PoiDetailPage() {
             {poi.address && (
               <InfoCard icon="📍" label="Location" value={poi.address} />
             )}
-            {poi.highway && (
-              <InfoCard icon="🛣️" label="Highway" value={poi.highway} />
-            )}
-            {poi.elevation && (
-              <InfoCard icon="⛰️" label="Elevation" value={poi.elevation} />
+            {poi.nearest_highway && (
+              <InfoCard icon="🛣️" label="Highway" value={poi.nearest_highway} />
             )}
           </div>
         </section>
