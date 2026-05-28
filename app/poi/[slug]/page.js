@@ -84,20 +84,24 @@ export default function PoiDetailPage() {
       setNotFound(false);
 
       // 1. Try to fetch the POI directly by its database slug first (fast path).
+      //    Only consider published POIs — unpublished ones (tombstones) should 404.
       let { data: matchByDbSlug, error: dbSlugErr } = await supabase
         .from('pois')
         .select('*')
         .eq('slug', slug)
+        .eq('published', true)
         .maybeSingle();
 
       let match = matchByDbSlug;
 
       // 2. Fallback: if not found, scan all POIs and match by generated slug from name.
       //    This keeps old links working in case any POI doesn't have a slug column value yet.
+      //    Same as the fast path — only consider published POIs.
       if (!match) {
         const { data: allPois, error: allErr } = await supabase
           .from('pois')
-          .select('*');
+          .select('*')
+          .eq('published', true);
 
         if (allErr) {
           console.error('Error fetching POIs:', allErr);
