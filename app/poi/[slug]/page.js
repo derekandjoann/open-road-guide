@@ -555,7 +555,7 @@ export default function PoiDetailPage() {
                   color: '#444',
                   lineHeight: 1.6,
                   fontStyle: 'italic',
-                }}>{poi.fun_fact}</div>
+                }}>{parseInlineLinks(poi.fun_fact)}</div>
               </div>
             </div>
           </div>
