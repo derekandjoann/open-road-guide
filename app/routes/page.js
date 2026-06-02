@@ -22,13 +22,7 @@ const COLORS = {
 
 // Placeholder "coming soon" routes — edit names/taglines anytime,
 // or remove entries as they get added to the database.
-const COMING_SOON = [
-  {
-    name: 'Scenic Byway 143',
-    state: 'Utah',
-    tagline: 'High country drive through Cedar Breaks and Brian Head — coolest air in southern Utah.',
-  },
-];
+const COMING_SOON = [];
 
 export default function RoutesIndexPage() {
   const [routes, setRoutes] = useState([]);
