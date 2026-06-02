@@ -24,11 +24,6 @@ const COLORS = {
 // or remove entries as they get added to the database.
 const COMING_SOON = [
   {
-    name: 'Highway 24',
-    state: 'Utah',
-    tagline: 'Through the heart of Capitol Reef and the Waterpocket Fold.',
-  },
-  {
     name: 'Highway 9',
     state: 'Utah',
     tagline: "Zion's east-side approach — slot canyons, switchbacks, and the Mt. Carmel tunnel.",
@@ -37,11 +32,6 @@ const COMING_SOON = [
     name: 'Scenic Byway 143',
     state: 'Utah',
     tagline: 'High country drive through Cedar Breaks and Brian Head — coolest air in southern Utah.',
-  },
-  {
-    name: 'Highway 128',
-    state: 'Utah',
-    tagline: "Moab's Colorado River road — red walls, ranches, and the route to Castle Valley.",
   },
 ];
 
