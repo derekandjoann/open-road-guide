@@ -40,6 +40,7 @@ export default function PoiDetailPage() {
   const [relatedPois, setRelatedPois] = useState([]);
   const [nearbyIsGeo, setNearbyIsGeo] = useState(false);
   const [stories, setStories] = useState([]);
+  const [regions, setRegions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -181,6 +182,31 @@ export default function PoiDetailPage() {
           return new Date(bDate) - new Date(aDate);
         });
       setStories(myStories);
+
+      // 4b. Fetch the region(s) this POI belongs to, via the region_pois join table.
+      //     Each published POI normally sits in exactly one published region; we
+      //     handle an array defensively in case that ever changes. Only published
+      //     regions are linked (an unpublished region's page won't load).
+      const { data: regionRows, error: regionsErr } = await supabase
+        .from('region_pois')
+        .select(`
+          region:regions (
+            slug,
+            name,
+            published
+          )
+        `)
+        .eq('poi_id', match.id);
+
+      if (regionsErr) {
+        console.warn('Could not load regions:', regionsErr);
+      }
+
+      const myRegions = (regionRows || [])
+        .map(row => row.region)
+        .filter(r => r && r.published)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setRegions(myRegions);
 
       // 5. Find NEARBY POIs by geographic distance (primary path).
       //    Calls the nearby_pois() Postgres function, which ranks all other
@@ -446,6 +472,43 @@ export default function PoiDetailPage() {
             lineHeight: 1.1,
             marginBottom: '16px',
           }}>{poi.name}</h1>
+
+          {/* Region link(s) — surfaces which region this place belongs to */}
+          {regions.length > 0 && (
+            <div style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: 'clamp(13px, 2vw, 15px)',
+              fontWeight: 600,
+              marginBottom: '16px',
+            }}>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                color: 'rgba(255,255,255,0.55)',
+              }}>
+                <span aria-hidden="true" style={{ fontSize: '14px' }}>📍</span>
+                Part of
+              </span>
+              {regions.map((region) => (
+                <a
+                  key={region.slug}
+                  href={`/region/${region.slug}`}
+                  style={{
+                    color: 'rgba(255,255,255,0.92)',
+                    textDecoration: 'none',
+                    borderBottom: '1.5px solid rgba(157,78,221,0.85)',
+                    paddingBottom: '1px',
+                  }}
+                >
+                  {(region.name || '').trim()}
+                </a>
+              ))}
+            </div>
+          )}
 
           {poi.tagline && (
             <p style={{
@@ -801,7 +864,7 @@ export default function PoiDetailPage() {
                       color: '#1a1a2e',
                       lineHeight: 1.25,
                     }}>
-                      {story.title}
+                      {(story.title || '').trim()}
                     </div>
                     <div style={{
                       fontSize: '12px',
