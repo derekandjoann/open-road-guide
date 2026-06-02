@@ -56,6 +56,47 @@ const CATEGORY_ORDER = [
   'attraction',
 ];
 
+// Render inline [label](href) markdown links within a plain-text string.
+// Internal links (starting with "/") use next/link; external links use <a>.
+function renderInline(text) {
+  const parts = [];
+  const regex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    const label = match[1];
+    const href = match[2];
+    if (/^https?:\/\//.test(href)) {
+      parts.push(
+        <a
+          key={key++}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={styles.inlineLink}
+        >
+          {label}
+        </a>
+      );
+    } else {
+      parts.push(
+        <Link key={key++} href={href} style={styles.inlineLink}>
+          {label}
+        </Link>
+      );
+    }
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  return parts;
+}
+
 export default function RegionPage() {
   const params = useParams();
   const slug = params?.slug;
@@ -225,7 +266,7 @@ export default function RegionPage() {
         <section style={styles.intro}>
           {paragraphs.map((p, i) => (
             <p key={i} style={styles.introPara}>
-              {p}
+              {renderInline(p)}
             </p>
           ))}
         </section>
@@ -302,6 +343,12 @@ const styles = {
     marginBottom: '1rem',
   },
   link: { color: COLORS.coral, textDecoration: 'none', fontWeight: 500 },
+  inlineLink: {
+    color: COLORS.coral,
+    textDecoration: 'underline',
+    textUnderlineOffset: '2px',
+    fontWeight: 500,
+  },
   breadcrumb: {
     fontSize: '0.9rem',
     color: COLORS.warmGray,
