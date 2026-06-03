@@ -1,7 +1,3 @@
-'use client';
-
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
 
@@ -97,106 +93,68 @@ function renderInline(text) {
   return parts;
 }
 
-export default function RegionPage() {
-  const params = useParams();
-  const slug = params?.slug;
+// Pre-build a static page for every published region at deploy time.
+// Unknown slugs still render on-demand; a deploy refreshes this list.
+export async function generateStaticParams() {
+  const { data } = await supabase
+    .from('regions')
+    .select('slug')
+    .eq('published', true);
 
-  const [region, setRegion] = useState(null);
-  const [places, setPlaces] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  return (data || [])
+    .filter((r) => r.slug)
+    .map((r) => ({ slug: r.slug }));
+}
 
-  useEffect(() => {
-    if (!slug) return;
+// Server-rendered metadata. Title, description, Open Graph tags and canonical
+// ship in the initial HTML, so crawlers see them instead of "Loading…".
+export async function generateMetadata({ params }) {
+  const { slug } = await params;
 
-    async function load() {
-      setLoading(true);
+  const { data: region } = await supabase
+    .from('regions')
+    .select('name, seo_title, meta_description, short_description, hero_image_url')
+    .eq('slug', slug)
+    .eq('published', true)
+    .maybeSingle();
 
-      // Fetch the region
-      const { data: regionData, error: regionErr } = await supabase
-        .from('regions')
-        .select('*')
-        .eq('slug', slug)
-        .eq('published', true)
-        .maybeSingle();
-
-      if (regionErr || !regionData) {
-        setNotFound(true);
-        setLoading(false);
-        return;
-      }
-
-      setRegion(regionData);
-
-      // Fetch the POIs that belong to this region
-      const { data: poiData } = await supabase
-        .from('region_pois')
-        .select(
-          'poi:pois(id, name, slug, tagline, nearest_city, nearest_highway, category, thumbnail_url, published)'
-        )
-        .eq('region_id', regionData.id);
-
-      const cleaned = (poiData || [])
-        .map((row) => row.poi)
-        .filter((p) => p && p.published !== false)
-        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-
-      setPlaces(cleaned);
-      setLoading(false);
-    }
-
-    load();
-  }, [slug]);
-
-  // SEO meta tags
-  useEffect(() => {
-    if (!region) return;
-
-    const title = region.seo_title || `${region.name} | Open Road Guide`;
-    const desc =
-      region.meta_description ||
-      region.short_description ||
-      `Explore ${region.name} — a complete regional guide with the places worth stopping for.`;
-
-    document.title = title;
-
-    const setMeta = (selector, attr, value) => {
-      let el = document.querySelector(selector);
-      if (!el) {
-        el = document.createElement('meta');
-        const m = selector.match(/\[(\w+)="([^"]+)"\]/);
-        if (m) el.setAttribute(m[1], m[2]);
-        document.head.appendChild(el);
-      }
-      el.setAttribute(attr, value);
-    };
-
-    setMeta('meta[name="description"]', 'content', desc);
-    setMeta('meta[property="og:title"]', 'content', title);
-    setMeta('meta[property="og:description"]', 'content', desc);
-    setMeta('meta[property="og:type"]', 'content', 'article');
-    if (region.hero_image_url) {
-      setMeta('meta[property="og:image"]', 'content', region.hero_image_url);
-    }
-
-    let canonical = document.querySelector('link[rel="canonical"]');
-    if (!canonical) {
-      canonical = document.createElement('link');
-      canonical.setAttribute('rel', 'canonical');
-      document.head.appendChild(canonical);
-    }
-    canonical.setAttribute('href', `https://openroadguide.com/region/${slug}`);
-  }, [region, slug]);
-
-  if (loading) {
-    return (
-      <main style={styles.main}>
-        <div style={styles.loading}>Loading…</div>
-      </main>
-    );
+  if (!region) {
+    return { title: { absolute: 'Region not found | Open Road Guide' } };
   }
 
-  if (notFound || !region) {
+  const title = region.seo_title || `${region.name} | Open Road Guide`;
+  const description =
+    region.meta_description ||
+    region.short_description ||
+    `Explore ${region.name} — a complete regional guide with the places worth stopping for.`;
+  const url = `https://openroadguide.com/region/${slug}`;
+
+  return {
+    title: { absolute: title },
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      title,
+      description,
+      type: 'article',
+      url,
+      ...(region.hero_image_url ? { images: [region.hero_image_url] } : {}),
+    },
+  };
+}
+
+export default async function RegionPage({ params }) {
+  const { slug } = await params;
+
+  // Fetch the region
+  const { data: region } = await supabase
+    .from('regions')
+    .select('*')
+    .eq('slug', slug)
+    .eq('published', true)
+    .maybeSingle();
+
+  if (!region) {
     return (
       <main style={styles.main}>
         <div style={styles.notFound}>
@@ -209,6 +167,19 @@ export default function RegionPage() {
       </main>
     );
   }
+
+  // Fetch the POIs that belong to this region (many-to-many via region_pois)
+  const { data: poiData } = await supabase
+    .from('region_pois')
+    .select(
+      'poi:pois(id, name, slug, tagline, nearest_city, nearest_highway, category, thumbnail_url, published)'
+    )
+    .eq('region_id', region.id);
+
+  const places = (poiData || [])
+    .map((row) => row.poi)
+    .filter((p) => p && p.published !== false)
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
   // Split description into paragraphs
   const paragraphs = (region.description || '')
