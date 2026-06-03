@@ -25,15 +25,17 @@ export default async function sitemap() {
     { url: `${BASE}`, lastModified: now, changeFrequency: 'weekly', priority: 1.0 },
     { url: `${BASE}/explore`, lastModified: now, changeFrequency: 'weekly', priority: 0.9 },
     { url: `${BASE}/routes`, lastModified: now, changeFrequency: 'weekly', priority: 0.8 },
+    { url: `${BASE}/regions`, lastModified: now, changeFrequency: 'weekly', priority: 0.8 },
     { url: `${BASE}/stories`, lastModified: now, changeFrequency: 'weekly', priority: 0.8 },
     { url: `${BASE}/about`, lastModified: now, changeFrequency: 'monthly', priority: 0.5 },
     { url: `${BASE}/privacy`, lastModified: now, changeFrequency: 'yearly', priority: 0.3 },
   ];
 
-  const [pois, stories, routes] = await Promise.all([
+  const [pois, stories, routes, regions] = await Promise.all([
     fetchRows('pois'),
     fetchRows('stories'),
     fetchRows('routes'),
+    fetchRows('regions'),
   ]);
 
   const toEntry = (prefix, priority, changeFrequency) => (row) => ({
@@ -47,6 +49,7 @@ export default async function sitemap() {
     ...staticPages,
     ...pois.map(toEntry('poi', 0.7, 'monthly')),
     ...routes.map(toEntry('route', 0.7, 'monthly')),
+    ...regions.map(toEntry('region', 0.7, 'monthly')),
     ...stories.map(toEntry('story', 0.6, 'monthly')),
   ];
 }
