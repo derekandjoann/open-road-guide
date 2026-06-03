@@ -1,7 +1,3 @@
-'use client';
-
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
@@ -30,117 +26,69 @@ const COLORS = {
   warmGray: '#666',
 };
 
-export default function StoryPage() {
-  const params = useParams();
-  const slug = params?.slug;
+// Pre-build a static page for every published story at deploy time.
+// Unknown slugs still render on-demand; a deploy refreshes this list.
+export async function generateStaticParams() {
+  const { data } = await supabase
+    .from('stories')
+    .select('slug')
+    .eq('published', true);
 
-  const [story, setStory] = useState(null);
-  const [relatedPois, setRelatedPois] = useState([]);
-  const [relatedRoutes, setRelatedRoutes] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  return (data || [])
+    .filter((s) => s.slug)
+    .map((s) => ({ slug: s.slug }));
+}
 
-  useEffect(() => {
-    if (!slug) return;
+// Server-rendered metadata. The title, description, Open Graph tags and
+// canonical now ship in the initial HTML, so crawlers see them instead of
+// the old client-side "Loading…" shell.
+export async function generateMetadata({ params }) {
+  const { slug } = await params;
 
-    async function load() {
-      setLoading(true);
+  const { data: story } = await supabase
+    .from('stories')
+    .select('title, seo_title, meta_description, excerpt, hero_image_url')
+    .eq('slug', slug)
+    .eq('published', true)
+    .maybeSingle();
 
-      // Fetch the story
-      const { data: storyData, error: storyErr } = await supabase
-        .from('stories')
-        .select('*')
-        .eq('slug', slug)
-        .eq('published', true)
-        .maybeSingle();
-
-      if (storyErr || !storyData) {
-        setNotFound(true);
-        setLoading(false);
-        return;
-      }
-
-      setStory(storyData);
-
-      // Fetch related POIs (many-to-many via story_pois join)
-      const { data: poiData } = await supabase
-        .from('story_pois')
-        .select('poi:pois(id, name, slug, tagline, nearest_city, category, published)')
-        .eq('story_id', storyData.id);
-
-      const cleanedPois = (poiData || [])
-        .map((row) => row.poi)
-        .filter((p) => p && p.published !== false);
-
-      setRelatedPois(cleanedPois);
-
-      // Fetch related routes (many-to-many via story_routes join)
-      const { data: routeData } = await supabase
-        .from('story_routes')
-        .select('route:routes(id, name, slug, short_description, state, published)')
-        .eq('story_id', storyData.id);
-
-      const cleanedRoutes = (routeData || [])
-        .map((row) => row.route)
-        .filter((r) => r && r.published !== false);
-
-      setRelatedRoutes(cleanedRoutes);
-
-      setLoading(false);
-    }
-
-    load();
-  }, [slug]);
-
-  // SEO meta tags
-  useEffect(() => {
-    if (!story) return;
-
-    const title = story.seo_title || `${story.title} | Open Road Guide`;
-    const desc =
-      story.meta_description ||
-      story.excerpt ||
-      `Read ${story.title} on Open Road Guide.`;
-
-    document.title = title;
-
-    const setMeta = (selector, attr, value) => {
-      let el = document.querySelector(selector);
-      if (!el) {
-        el = document.createElement('meta');
-        const m = selector.match(/\[(\w+)="([^"]+)"\]/);
-        if (m) el.setAttribute(m[1], m[2]);
-        document.head.appendChild(el);
-      }
-      el.setAttribute(attr, value);
-    };
-
-    setMeta('meta[name="description"]', 'content', desc);
-    setMeta('meta[property="og:title"]', 'content', title);
-    setMeta('meta[property="og:description"]', 'content', desc);
-    setMeta('meta[property="og:type"]', 'content', 'article');
-    if (story.hero_image_url) {
-      setMeta('meta[property="og:image"]', 'content', story.hero_image_url);
-    }
-
-    let canonical = document.querySelector('link[rel="canonical"]');
-    if (!canonical) {
-      canonical = document.createElement('link');
-      canonical.setAttribute('rel', 'canonical');
-      document.head.appendChild(canonical);
-    }
-    canonical.setAttribute('href', `https://openroadguide.com/story/${slug}`);
-  }, [story, slug]);
-
-  if (loading) {
-    return (
-      <main style={styles.main}>
-        <div style={styles.loading}>Loading…</div>
-      </main>
-    );
+  if (!story) {
+    return { title: { absolute: 'Story not found | Open Road Guide' } };
   }
 
-  if (notFound || !story) {
+  const title = story.seo_title || `${story.title} | Open Road Guide`;
+  const description =
+    story.meta_description ||
+    story.excerpt ||
+    `Read ${story.title} on Open Road Guide.`;
+  const url = `https://openroadguide.com/story/${slug}`;
+
+  return {
+    title: { absolute: title },
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      title,
+      description,
+      type: 'article',
+      url,
+      ...(story.hero_image_url ? { images: [story.hero_image_url] } : {}),
+    },
+  };
+}
+
+export default async function StoryPage({ params }) {
+  const { slug } = await params;
+
+  // Fetch the story
+  const { data: story } = await supabase
+    .from('stories')
+    .select('*')
+    .eq('slug', slug)
+    .eq('published', true)
+    .maybeSingle();
+
+  if (!story) {
     return (
       <main style={styles.main}>
         <div style={styles.notFound}>
@@ -154,13 +102,33 @@ export default function StoryPage() {
     );
   }
 
+  // Fetch related POIs (many-to-many via story_pois) and related routes
+  // (via story_routes) in parallel.
+  const [{ data: poiData }, { data: routeData }] = await Promise.all([
+    supabase
+      .from('story_pois')
+      .select('poi:pois(id, name, slug, tagline, nearest_city, category, published)')
+      .eq('story_id', story.id),
+    supabase
+      .from('story_routes')
+      .select('route:routes(id, name, slug, short_description, state, published)')
+      .eq('story_id', story.id),
+  ]);
+
+  const relatedPois = (poiData || [])
+    .map((row) => row.poi)
+    .filter((p) => p && p.published !== false);
+
+  const relatedRoutes = (routeData || [])
+    .map((row) => row.route)
+    .filter((r) => r && r.published !== false);
+
   // Split body into blocks on blank lines. Each block becomes a heading or
   // a paragraph based on its leading characters.
   //   "## Foo"  -> section heading  (h2)
   //   "### Bar" -> sub-heading       (h3)
   //   anything else -> paragraph
-  // Stories without any markdown headings (like the original Boulder story)
-  // render exactly as before.
+  // Stories without any markdown headings render exactly as before.
   const blocks = (story.body || '')
     .split(/\n\n+/)
     .map((b) => b.trim())
