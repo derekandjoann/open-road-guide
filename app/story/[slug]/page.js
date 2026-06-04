@@ -143,152 +143,223 @@ export default async function StoryPage({ params }) {
       })
     : null;
 
+  // Structured data (JSON-LD): Article + BreadcrumbList. Emitted as a
+  // server-rendered <script> so crawlers and AI answer engines can read a
+  // machine-readable description of the story alongside the visible prose.
+  const pageUrl = `https://openroadguide.com/story/${slug}`;
+  const ldDescription =
+    story.meta_description ||
+    story.excerpt ||
+    `Read ${story.title} on Open Road Guide.`;
+
+  const articleLd = {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: story.title,
+    description: ldDescription,
+    inLanguage: 'en-US',
+    ...(story.hero_image_url ? { image: [story.hero_image_url] } : {}),
+    ...(story.published_at ? { datePublished: story.published_at } : {}),
+    ...(story.updated_at || story.published_at
+      ? { dateModified: story.updated_at || story.published_at }
+      : {}),
+    ...(story.story_type ? { articleSection: story.story_type } : {}),
+    author: {
+      '@type': 'Person',
+      name: story.author_name || 'Open Road Guide',
+    },
+    publisher: {
+      '@type': 'Organization',
+      name: 'Open Road Guide',
+      url: 'https://openroadguide.com',
+    },
+    mainEntityOfPage: { '@type': 'WebPage', '@id': pageUrl },
+    url: pageUrl,
+  };
+
+  const breadcrumbLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      {
+        '@type': 'ListItem',
+        position: 1,
+        name: 'Home',
+        item: 'https://openroadguide.com/',
+      },
+      {
+        '@type': 'ListItem',
+        position: 2,
+        name: 'Stories',
+        item: 'https://openroadguide.com/stories',
+      },
+      {
+        '@type': 'ListItem',
+        position: 3,
+        name: story.title,
+        item: pageUrl,
+      },
+    ],
+  };
+
+  // Escape "<" so a stray "</script>" in any field can't break out of the tag.
+  const jsonLd = JSON.stringify([articleLd, breadcrumbLd]).replace(
+    /</g,
+    '\\u003c'
+  );
+
   return (
-    <main style={styles.main}>
-      {/* Breadcrumb */}
-      <nav style={styles.breadcrumb}>
-        <Link href="/" style={styles.crumbLink}>
-          Home
-        </Link>
-        <span style={styles.crumbSep}>›</span>
-        <Link href="/stories" style={styles.crumbLink}>
-          Stories
-        </Link>
-        <span style={styles.crumbSep}>›</span>
-        <span style={styles.crumbCurrent}>{story.title}</span>
-      </nav>
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLd }}
+      />
+      <main style={styles.main}>
+        {/* Breadcrumb */}
+        <nav style={styles.breadcrumb}>
+          <Link href="/" style={styles.crumbLink}>
+            Home
+          </Link>
+          <span style={styles.crumbSep}>›</span>
+          <Link href="/stories" style={styles.crumbLink}>
+            Stories
+          </Link>
+          <span style={styles.crumbSep}>›</span>
+          <span style={styles.crumbCurrent}>{story.title}</span>
+        </nav>
 
-      {/* Hero image (if set) */}
-      {story.hero_image_url && (
-        <div style={styles.heroImageWrap}>
-          <img
-            src={story.hero_image_url}
-            alt={story.hero_image_alt || story.title}
-            style={styles.heroImage}
-          />
-        </div>
-      )}
-
-      {/* Title block */}
-      <header style={styles.titleBlock}>
-        {story.story_type && (
-          <div style={styles.eyebrow}>{story.story_type}</div>
-        )}
-        <h1 style={styles.title}>{story.title}</h1>
-        {story.subtitle && (
-          <h2 style={styles.subtitle}>{story.subtitle}</h2>
-        )}
-        {story.excerpt && (
-          <p style={styles.excerpt}>{story.excerpt}</p>
-        )}
-
-        {/* Byline row */}
-        <div style={styles.byline}>
-          {story.author_name && (
-            <span style={styles.bylineAuthor}>By {story.author_name}</span>
-          )}
-          {story.author_name && (publishedDate || story.reading_time_minutes) && (
-            <span style={styles.bylineSep}>·</span>
-          )}
-          {publishedDate && (
-            <span>{publishedDate}</span>
-          )}
-          {publishedDate && story.reading_time_minutes && (
-            <span style={styles.bylineSep}>·</span>
-          )}
-          {story.reading_time_minutes && (
-            <span>{story.reading_time_minutes} min read</span>
-          )}
-        </div>
-      </header>
-
-      {/* Body */}
-      {blocks.length > 0 && (
-        <article style={styles.bodyWrap}>
-          {blocks.map((block, i) => {
-            // Order matters: check ### before ## (since ### also starts with ##)
-            if (block.startsWith('### ')) {
-              return (
-                <h3 key={i} style={styles.bodyH3}>
-                  {block.slice(4)}
-                </h3>
-              );
-            }
-            if (block.startsWith('## ')) {
-              return (
-                <h2 key={i} style={styles.bodyH2}>
-                  {block.slice(3)}
-                </h2>
-              );
-            }
-            return (
-              <p key={i} style={styles.bodyPara}>
-                {parseInlineLinks(block)}
-              </p>
-            );
-          })}
-        </article>
-      )}
-
-      {/* Related POIs */}
-      {relatedPois.length > 0 && (
-        <section style={styles.relatedSection}>
-          <h3 style={styles.relatedHeading}>Places in this story</h3>
-          <div style={styles.relatedGrid}>
-            {relatedPois.map((poi) => (
-              <Link
-                key={poi.id}
-                href={`/poi/${poi.slug || toSlug(poi.name)}`}
-                style={styles.relatedCard}
-              >
-                <div style={styles.relatedCardName}>{poi.name}</div>
-                {poi.nearest_city && (
-                  <div style={styles.relatedCardCity}>{poi.nearest_city}</div>
-                )}
-                {poi.tagline && (
-                  <p style={styles.relatedCardTagline}>{poi.tagline}</p>
-                )}
-                <div style={styles.relatedCardCta}>View place →</div>
-              </Link>
-            ))}
+        {/* Hero image (if set) */}
+        {story.hero_image_url && (
+          <div style={styles.heroImageWrap}>
+            <img
+              src={story.hero_image_url}
+              alt={story.hero_image_alt || story.title}
+              style={styles.heroImage}
+            />
           </div>
-        </section>
-      )}
+        )}
 
-      {/* Related Routes */}
-      {relatedRoutes.length > 0 && (
-        <section style={styles.relatedSection}>
-          <h3 style={styles.relatedHeading}>Drives in this story</h3>
-          <div style={styles.relatedGrid}>
-            {relatedRoutes.map((route) => (
-              <Link
-                key={route.id}
-                href={`/route/${route.slug}`}
-                style={styles.relatedCard}
-              >
-                <div style={styles.relatedCardName}>{route.name}</div>
-                {route.state && (
-                  <div style={styles.relatedCardCity}>{route.state}</div>
-                )}
-                {route.short_description && (
-                  <p style={styles.relatedCardTagline}>
-                    {route.short_description}
-                  </p>
-                )}
-                <div style={styles.relatedCardCta}>Plan this drive →</div>
-              </Link>
-            ))}
+        {/* Title block */}
+        <header style={styles.titleBlock}>
+          {story.story_type && (
+            <div style={styles.eyebrow}>{story.story_type}</div>
+          )}
+          <h1 style={styles.title}>{story.title}</h1>
+          {story.subtitle && (
+            <h2 style={styles.subtitle}>{story.subtitle}</h2>
+          )}
+          {story.excerpt && (
+            <p style={styles.excerpt}>{story.excerpt}</p>
+          )}
+
+          {/* Byline row */}
+          <div style={styles.byline}>
+            {story.author_name && (
+              <span style={styles.bylineAuthor}>By {story.author_name}</span>
+            )}
+            {story.author_name && (publishedDate || story.reading_time_minutes) && (
+              <span style={styles.bylineSep}>·</span>
+            )}
+            {publishedDate && (
+              <span>{publishedDate}</span>
+            )}
+            {publishedDate && story.reading_time_minutes && (
+              <span style={styles.bylineSep}>·</span>
+            )}
+            {story.reading_time_minutes && (
+              <span>{story.reading_time_minutes} min read</span>
+            )}
           </div>
-        </section>
-      )}
+        </header>
 
-      {/* Closing */}
-      <section style={styles.closing}>
-        <Link href="/stories" style={styles.closingLink}>
-          ← Read more stories
-        </Link>
-      </section>
-    </main>
+        {/* Body */}
+        {blocks.length > 0 && (
+          <article style={styles.bodyWrap}>
+            {blocks.map((block, i) => {
+              // Order matters: check ### before ## (since ### also starts with ##)
+              if (block.startsWith('### ')) {
+                return (
+                  <h3 key={i} style={styles.bodyH3}>
+                    {block.slice(4)}
+                  </h3>
+                );
+              }
+              if (block.startsWith('## ')) {
+                return (
+                  <h2 key={i} style={styles.bodyH2}>
+                    {block.slice(3)}
+                  </h2>
+                );
+              }
+              return (
+                <p key={i} style={styles.bodyPara}>
+                  {parseInlineLinks(block)}
+                </p>
+              );
+            })}
+          </article>
+        )}
+
+        {/* Related POIs */}
+        {relatedPois.length > 0 && (
+          <section style={styles.relatedSection}>
+            <h3 style={styles.relatedHeading}>Places in this story</h3>
+            <div style={styles.relatedGrid}>
+              {relatedPois.map((poi) => (
+                <Link
+                  key={poi.id}
+                  href={`/poi/${poi.slug || toSlug(poi.name)}`}
+                  style={styles.relatedCard}
+                >
+                  <div style={styles.relatedCardName}>{poi.name}</div>
+                  {poi.nearest_city && (
+                    <div style={styles.relatedCardCity}>{poi.nearest_city}</div>
+                  )}
+                  {poi.tagline && (
+                    <p style={styles.relatedCardTagline}>{poi.tagline}</p>
+                  )}
+                  <div style={styles.relatedCardCta}>View place →</div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Related Routes */}
+        {relatedRoutes.length > 0 && (
+          <section style={styles.relatedSection}>
+            <h3 style={styles.relatedHeading}>Drives in this story</h3>
+            <div style={styles.relatedGrid}>
+              {relatedRoutes.map((route) => (
+                <Link
+                  key={route.id}
+                  href={`/route/${route.slug}`}
+                  style={styles.relatedCard}
+                >
+                  <div style={styles.relatedCardName}>{route.name}</div>
+                  {route.state && (
+                    <div style={styles.relatedCardCity}>{route.state}</div>
+                  )}
+                  {route.short_description && (
+                    <p style={styles.relatedCardTagline}>
+                      {route.short_description}
+                    </p>
+                  )}
+                  <div style={styles.relatedCardCta}>Plan this drive →</div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Closing */}
+        <section style={styles.closing}>
+          <Link href="/stories" style={styles.closingLink}>
+            ← Read more stories
+          </Link>
+        </section>
+      </main>
+    </>
   );
 }
 
