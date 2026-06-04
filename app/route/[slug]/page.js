@@ -1,9 +1,13 @@
-'use client';
-
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
+
+// Render every route on demand (server-side) rather than statically at build
+// time, matching the POI page. Route descriptions and route_pois editorial
+// notes are prose edited through Supabase, and the established workflow is that
+// such edits go live instantly with no deploy. Dynamic rendering preserves that
+// while still shipping fully server-rendered HTML and real per-route
+// <title>/<meta>/Open Graph tags (via generateMetadata) for crawlers.
+export const dynamic = 'force-dynamic';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -70,106 +74,55 @@ function renderInline(text) {
   return parts;
 }
 
-export default function RoutePage() {
-  const params = useParams();
-  const slug = params?.slug;
+// Server-rendered metadata. Title, description, Open Graph and canonical now
+// ship in the initial HTML instead of being injected client-side after load.
+export async function generateMetadata({ params }) {
+  const { slug } = await params;
 
-  const [route, setRoute] = useState(null);
-  const [stops, setStops] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  const { data: route } = await supabase
+    .from('routes')
+    .select('name, seo_title, meta_description, short_description, hero_image_url')
+    .eq('slug', slug)
+    .eq('published', true)
+    .maybeSingle();
 
-  useEffect(() => {
-    if (!slug) return;
-
-    async function load() {
-      setLoading(true);
-
-      // Fetch the route
-      const { data: routeData, error: routeErr } = await supabase
-        .from('routes')
-        .select('*')
-        .eq('slug', slug)
-        .eq('published', true)
-        .maybeSingle();
-
-      if (routeErr || !routeData) {
-        setNotFound(true);
-        setLoading(false);
-        return;
-      }
-
-      setRoute(routeData);
-
-      // Fetch the POIs in driving order
-      const { data: stopData } = await supabase
-        .from('route_pois')
-        .select(
-          'order_index, notes, poi:pois(id, name, slug, tagline, description, nearest_city, nearest_highway, category, thumbnail_url, published)'
-        )
-        .eq('route_id', routeData.id)
-        .order('order_index', { ascending: true });
-
-      const cleaned = (stopData || [])
-        .filter((s) => s.poi && s.poi.published !== false)
-        .map((s) => ({ ...s.poi, order_index: s.order_index, route_notes: s.notes }));
-
-      setStops(cleaned);
-      setLoading(false);
-    }
-
-    load();
-  }, [slug]);
-
-  // SEO meta tags
-  useEffect(() => {
-    if (!route) return;
-
-    const title = route.seo_title || `${route.name} | Open Road Guide`;
-    const desc =
-      route.meta_description ||
-      route.short_description ||
-      `Explore ${route.name} — a complete road trip guide with stops, stories, and timing tips.`;
-
-    document.title = title;
-
-    const setMeta = (selector, attr, value) => {
-      let el = document.querySelector(selector);
-      if (!el) {
-        el = document.createElement('meta');
-        const m = selector.match(/\[(\w+)="([^"]+)"\]/);
-        if (m) el.setAttribute(m[1], m[2]);
-        document.head.appendChild(el);
-      }
-      el.setAttribute(attr, value);
-    };
-
-    setMeta('meta[name="description"]', 'content', desc);
-    setMeta('meta[property="og:title"]', 'content', title);
-    setMeta('meta[property="og:description"]', 'content', desc);
-    setMeta('meta[property="og:type"]', 'content', 'article');
-    if (route.hero_image_url) {
-      setMeta('meta[property="og:image"]', 'content', route.hero_image_url);
-    }
-
-    let canonical = document.querySelector('link[rel="canonical"]');
-    if (!canonical) {
-      canonical = document.createElement('link');
-      canonical.setAttribute('rel', 'canonical');
-      document.head.appendChild(canonical);
-    }
-    canonical.setAttribute('href', `https://openroadguide.com/route/${slug}`);
-  }, [route, slug]);
-
-  if (loading) {
-    return (
-      <main style={styles.main}>
-        <div style={styles.loading}>Loading…</div>
-      </main>
-    );
+  if (!route) {
+    return { title: { absolute: 'Route not found | Open Road Guide' } };
   }
 
-  if (notFound || !route) {
+  const title = route.seo_title || `${route.name} | Open Road Guide`;
+  const description =
+    route.meta_description ||
+    route.short_description ||
+    `Explore ${route.name} — a complete road trip guide with stops, stories, and timing tips.`;
+  const url = `https://openroadguide.com/route/${slug}`;
+
+  return {
+    title: { absolute: title },
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      title,
+      description,
+      type: 'article',
+      url,
+      ...(route.hero_image_url ? { images: [route.hero_image_url] } : {}),
+    },
+  };
+}
+
+export default async function RoutePage({ params }) {
+  const { slug } = await params;
+
+  // Fetch the route
+  const { data: route } = await supabase
+    .from('routes')
+    .select('*')
+    .eq('slug', slug)
+    .eq('published', true)
+    .maybeSingle();
+
+  if (!route) {
     return (
       <main style={styles.main}>
         <div style={styles.notFound}>
@@ -182,6 +135,19 @@ export default function RoutePage() {
       </main>
     );
   }
+
+  // Fetch the POIs in driving order
+  const { data: stopData } = await supabase
+    .from('route_pois')
+    .select(
+      'order_index, notes, poi:pois(id, name, slug, tagline, description, nearest_city, nearest_highway, category, thumbnail_url, published)'
+    )
+    .eq('route_id', route.id)
+    .order('order_index', { ascending: true });
+
+  const stops = (stopData || [])
+    .filter((s) => s.poi && s.poi.published !== false)
+    .map((s) => ({ ...s.poi, order_index: s.order_index, route_notes: s.notes }));
 
   // Split description into paragraphs
   const paragraphs = (route.description || '')
