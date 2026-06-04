@@ -74,6 +74,17 @@ function renderInline(text) {
   return parts;
 }
 
+// Flatten markdown prose to clean plain text for JSON-LD structured data:
+// turn [label](href) into just "label", drop stray markdown punctuation, and
+// collapse whitespace/newlines into single spaces.
+function toPlainText(md) {
+  return (md || '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[#*_>`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // Server-rendered metadata. Title, description, Open Graph and canonical now
 // ship in the initial HTML instead of being injected client-side after load.
 export async function generateMetadata({ params }) {
@@ -160,8 +171,62 @@ export default async function RoutePage({ params }) {
     ? route.best_seasons.join(' · ')
     : route.best_seasons || '';
 
+  // ---------- Structured data (JSON-LD) ----------
+  // Ships in the server-rendered HTML. A TouristTrip describes the drive itself
+  // and lists its stops in order as an itinerary; a BreadcrumbList mirrors the
+  // Home › Routes › Route trail (the breadcrumb is what Google renders as a
+  // rich result). Only fields we actually have are emitted.
+  const routeUrl = `https://openroadguide.com/route/${slug}`;
+  const ldDescription =
+    route.meta_description ||
+    route.short_description ||
+    toPlainText(route.description || '').slice(0, 500) ||
+    `Explore ${route.name} — a complete road trip guide.`;
+
+  const tripLd = {
+    '@context': 'https://schema.org',
+    '@type': 'TouristTrip',
+    name: route.name,
+    description: ldDescription,
+    url: routeUrl,
+  };
+  if (stops.length > 0) {
+    tripLd.itinerary = {
+      '@type': 'ItemList',
+      numberOfItems: stops.length,
+      itemListElement: stops.map((stop, idx) => ({
+        '@type': 'ListItem',
+        position: idx + 1,
+        item: {
+          '@type': 'TouristAttraction',
+          name: stop.name,
+          url: `https://openroadguide.com/poi/${stop.slug || toSlug(stop.name)}`,
+        },
+      })),
+    };
+  }
+
+  const breadcrumbLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://openroadguide.com/' },
+      { '@type': 'ListItem', position: 2, name: 'Routes', item: 'https://openroadguide.com/routes' },
+      { '@type': 'ListItem', position: 3, name: route.name, item: routeUrl },
+    ],
+  };
+
+  // Escape "<" so prose containing "</script>" can't break out of the tag.
+  const jsonLdHtml = JSON.stringify([tripLd, breadcrumbLd]).replace(/</g, '\\u003c');
+
   return (
     <main style={styles.main}>
+      {/* Structured data for search engines (read from the server-rendered HTML) */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLdHtml }}
+      />
+
       <nav style={styles.breadcrumb}>
         <Link href="/" style={styles.crumbLink}>
           Home
