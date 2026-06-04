@@ -42,6 +42,17 @@ function formatDistance(miles) {
   return `${n} mi away`;
 }
 
+// Flatten markdown prose to clean plain text for JSON-LD structured data:
+// turn [label](href) into just "label", drop stray markdown punctuation, and
+// collapse whitespace/newlines into single spaces.
+function toPlainText(md) {
+  return (md || '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[#*_>`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // Fetch a single published POI by its database slug (fast path), falling back
 // to scanning all published POIs and matching on a name-derived slug. The
 // fallback keeps older links working for any POI whose slug column doesn't
@@ -310,6 +321,54 @@ export default async function PoiDetailPage({ params }) {
     .map((b) => b.trim())
     .filter(Boolean);
 
+  // ---------- Structured data (JSON-LD) ----------
+  // Ships in the server-rendered HTML so crawlers can read it directly. A
+  // TouristAttraction describes the place itself (with geo + locality where we
+  // have them); a BreadcrumbList mirrors the on-page Home › Explore › Place
+  // trail so Google can show a breadcrumb in results. Only fields we actually
+  // have are emitted — no empty or guessed values.
+  const poiUrl = `https://openroadguide.com/poi/${slug}`;
+  const ldDescription =
+    poi.meta_description ||
+    poi.tagline ||
+    toPlainText(poi.description || '').slice(0, 500) ||
+    `Visit ${poi.name} on your Utah road trip.`;
+
+  const attractionLd = {
+    '@context': 'https://schema.org',
+    '@type': 'TouristAttraction',
+    name: poi.name,
+    description: ldDescription,
+    url: poiUrl,
+  };
+  if (poi.nearest_city) {
+    attractionLd.address = {
+      '@type': 'PostalAddress',
+      addressLocality: poi.nearest_city,
+      addressCountry: 'US',
+    };
+  }
+  if (poi.latitude != null && poi.longitude != null) {
+    attractionLd.geo = {
+      '@type': 'GeoCoordinates',
+      latitude: poi.latitude,
+      longitude: poi.longitude,
+    };
+  }
+
+  const breadcrumbLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://openroadguide.com/' },
+      { '@type': 'ListItem', position: 2, name: 'Explore', item: 'https://openroadguide.com/explore' },
+      { '@type': 'ListItem', position: 3, name: poi.name, item: poiUrl },
+    ],
+  };
+
+  // Escape "<" so a description containing "</script>" can't break out of the tag.
+  const jsonLdHtml = JSON.stringify([attractionLd, breadcrumbLd]).replace(/</g, '\\u003c');
+
   return (
     <div style={{
       fontFamily: "'Outfit', sans-serif",
@@ -317,6 +376,12 @@ export default async function PoiDetailPage({ params }) {
       background: '#f8f7f4',
       minHeight: '100vh',
     }}>
+
+      {/* Structured data for search engines (read from the server-rendered HTML) */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLdHtml }}
+      />
 
       {/* Top nav */}
       <nav style={{
