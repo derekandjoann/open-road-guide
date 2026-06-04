@@ -1,12 +1,23 @@
-'use client';
-
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
-import { supabase } from '../../../lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 import { getCategoryColor, getCategoryEmoji } from '../../../lib/categoryColors';
 import { toSlug } from '../../../lib/slug';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
-import MapView from '../../../components/MapView';
+import PoiMap from './PoiMap';
+
+// Render every POI on demand (server-side) rather than statically at build
+// time. This is deliberate: POI prose lives in Supabase and is edited
+// constantly, and the established workflow is that those edits go live
+// instantly with no deploy. Static generation (generateStaticParams) would
+// bake the prose at build time and make every edit deploy-gated. Dynamic
+// rendering keeps prose live-instant AND still ships fully server-rendered
+// HTML plus real per-POI <title>/<meta>/Open Graph tags (via generateMetadata
+// below) that crawlers can read — which is the whole SEO win.
+export const dynamic = 'force-dynamic';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
 // Colors for tag pills, keyed by tag_category slug.
 // These match the Open Road Guide palette (coral, teal, yellow, violet) with a few extras.
@@ -31,287 +42,74 @@ function formatDistance(miles) {
   return `${n} mi away`;
 }
 
-export default function PoiDetailPage() {
-  const params = useParams();
-  const slug = params.slug;
+// Fetch a single published POI by its database slug (fast path), falling back
+// to scanning all published POIs and matching on a name-derived slug. The
+// fallback keeps older links working for any POI whose slug column doesn't
+// match its name-generated slug. `columns` lets callers fetch only what they
+// need (generateMetadata wants a few fields; the page wants everything).
+async function fetchPoiBySlug(slug, columns) {
+  const { data: matchByDbSlug } = await supabase
+    .from('pois')
+    .select(columns)
+    .eq('slug', slug)
+    .eq('published', true)
+    .maybeSingle();
 
-  const [poi, setPoi] = useState(null);
-  const [tags, setTags] = useState([]);
-  const [relatedPois, setRelatedPois] = useState([]);
-  const [nearbyIsGeo, setNearbyIsGeo] = useState(false);
-  const [stories, setStories] = useState([]);
-  const [regions, setRegions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  if (matchByDbSlug) return matchByDbSlug;
 
-  // ---------- Update browser tab title + meta description for SEO ----------
-  useEffect(() => {
-    if (!poi) return;
-    const title = `${poi.name} | Open Road Guide`;
-    document.title = title;
+  const { data: allPois } = await supabase
+    .from('pois')
+    .select(columns)
+    .eq('published', true);
 
-    const desc =
-      poi.meta_description ||
-      poi.tagline ||
-      (poi.description ? poi.description.slice(0, 155) : `Visit ${poi.name} on your Utah road trip.`);
+  return (allPois || []).find((p) => toSlug(p.name) === slug) || null;
+}
 
-    let metaDesc = document.querySelector('meta[name="description"]');
-    if (!metaDesc) {
-      metaDesc = document.createElement('meta');
-      metaDesc.setAttribute('name', 'description');
-      document.head.appendChild(metaDesc);
-    }
-    metaDesc.setAttribute('content', desc);
+// Server-rendered metadata. The title, description, Open Graph tags and
+// canonical now ship in the initial HTML, so crawlers see them instead of the
+// old client-side document.title / injected-<meta> shell.
+export async function generateMetadata({ params }) {
+  const { slug } = await params;
 
-    // Open Graph for nicer link previews when shared
-    const setOg = (property, content) => {
-      let el = document.querySelector(`meta[property="${property}"]`);
-      if (!el) {
-        el = document.createElement('meta');
-        el.setAttribute('property', property);
-        document.head.appendChild(el);
-      }
-      el.setAttribute('content', content);
-    };
-    setOg('og:title', title);
-    setOg('og:description', desc);
-    setOg('og:type', 'article');
-  }, [poi]);
+  const poi = await fetchPoiBySlug(
+    slug,
+    'name, tagline, meta_description, description'
+  );
 
-  // ---------- Fetch POI, its tags, related POIs, and related stories ----------
-  useEffect(() => {
-    async function fetchEverything() {
-      setLoading(true);
-      setNotFound(false);
-
-      // 1. Try to fetch the POI directly by its database slug first (fast path).
-      //    Only consider published POIs — unpublished ones (tombstones) should 404.
-      let { data: matchByDbSlug, error: dbSlugErr } = await supabase
-        .from('pois')
-        .select('*')
-        .eq('slug', slug)
-        .eq('published', true)
-        .maybeSingle();
-
-      let match = matchByDbSlug;
-
-      // 2. Fallback: if not found, scan all POIs and match by generated slug from name.
-      //    This keeps old links working in case any POI doesn't have a slug column value yet.
-      //    Same as the fast path — only consider published POIs.
-      if (!match) {
-        const { data: allPois, error: allErr } = await supabase
-          .from('pois')
-          .select('*')
-          .eq('published', true);
-
-        if (allErr) {
-          console.error('Error fetching POIs:', allErr);
-          setNotFound(true);
-          setLoading(false);
-          return;
-        }
-
-        match = allPois?.find(p => toSlug(p.name) === slug);
-      }
-
-      if (!match) {
-        setNotFound(true);
-        setLoading(false);
-        return;
-      }
-
-      setPoi(match);
-
-      // 3. Fetch tags for this POI, joined with tag_categories so we can color them.
-      const { data: poiTagRows, error: tagsErr } = await supabase
-        .from('poi_tags')
-        .select(`
-          tag:tags (
-            id,
-            slug,
-            name,
-            description,
-            category:tag_categories ( slug, name )
-          )
-        `)
-        .eq('poi_id', match.id);
-
-      if (tagsErr) {
-        console.warn('Could not load tags:', tagsErr);
-      }
-
-      const myTags = (poiTagRows || [])
-        .map(row => row.tag)
-        .filter(Boolean);
-      setTags(myTags);
-
-      // 4. Fetch stories that feature this POI via the story_pois join table.
-      //    Only show published stories. Sorted by published_at desc (newest first),
-      //    falling back to created_at for stories without a published_at value.
-      const { data: storyRows, error: storiesErr } = await supabase
-        .from('story_pois')
-        .select(`
-          story:stories (
-            id,
-            slug,
-            title,
-            subtitle,
-            excerpt,
-            story_type,
-            hero_image_url,
-            hero_image_alt,
-            reading_time_minutes,
-            author_name,
-            published,
-            published_at,
-            created_at
-          )
-        `)
-        .eq('poi_id', match.id);
-
-      if (storiesErr) {
-        console.warn('Could not load stories:', storiesErr);
-      }
-
-      const myStories = (storyRows || [])
-        .map(row => row.story)
-        .filter(s => s && s.published) // only published stories
-        .sort((a, b) => {
-          const aDate = a.published_at || a.created_at;
-          const bDate = b.published_at || b.created_at;
-          return new Date(bDate) - new Date(aDate);
-        });
-      setStories(myStories);
-
-      // 4b. Fetch the region(s) this POI belongs to, via the region_pois join table.
-      //     Each published POI normally sits in exactly one published region; we
-      //     handle an array defensively in case that ever changes. Only published
-      //     regions are linked (an unpublished region's page won't load).
-      const { data: regionRows, error: regionsErr } = await supabase
-        .from('region_pois')
-        .select(`
-          region:regions (
-            slug,
-            name,
-            published
-          )
-        `)
-        .eq('poi_id', match.id);
-
-      if (regionsErr) {
-        console.warn('Could not load regions:', regionsErr);
-      }
-
-      const myRegions = (regionRows || [])
-        .map(row => row.region)
-        .filter(r => r && r.published)
-        .sort((a, b) => a.name.localeCompare(b.name));
-      setRegions(myRegions);
-
-      // 5. Find NEARBY POIs by geographic distance (primary path).
-      //    Calls the nearby_pois() Postgres function, which ranks all other
-      //    published POIs by great-circle distance from this one. Falls back to
-      //    the original theme-based logic (shared tags, then same category) only
-      //    when this POI has no coordinates or the lookup comes back empty.
-      let usedGeo = false;
-
-      if (match.slug && match.latitude != null && match.longitude != null) {
-        const { data: nearbyData, error: nearbyErr } = await supabase
-          .rpc('nearby_pois', { target_slug: match.slug, max_results: 6 });
-
-        if (nearbyErr) {
-          console.warn('Could not load nearby POIs:', nearbyErr);
-        } else if (nearbyData && nearbyData.length > 0) {
-          const withDistance = nearbyData.filter(p => p.distance_miles != null);
-          if (withDistance.length > 0) {
-            setRelatedPois(withDistance);
-            usedGeo = true;
-          }
-        }
-      }
-
-      setNearbyIsGeo(usedGeo);
-
-      if (!usedGeo) {
-        // ---- Fallback: original theme-based related stops ----
-        // Shared tags first (most-overlap wins), then same-category.
-        const myTagIds = myTags.map(t => t.id);
-
-        if (myTagIds.length > 0) {
-          // Get every poi_tag row for any of my tags, excluding this POI itself.
-          const { data: sharedRows } = await supabase
-            .from('poi_tags')
-            .select('poi_id, tag_id')
-            .in('tag_id', myTagIds)
-            .neq('poi_id', match.id);
-
-          // Tally overlap counts per POI
-          const overlap = {};
-          (sharedRows || []).forEach(r => {
-            overlap[r.poi_id] = (overlap[r.poi_id] || 0) + 1;
-          });
-
-          // Sort POIs by shared-tag count, take the top 4
-          const topPoiIds = Object.entries(overlap)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 4)
-            .map(([id]) => id);
-
-          if (topPoiIds.length > 0) {
-            const { data: relatedData } = await supabase
-              .from('pois')
-              .select('id, name, slug, category, tagline')
-              .eq('published', true)
-              .in('id', topPoiIds);
-
-            // Preserve the sort order from overlap counts
-            const ordered = topPoiIds
-              .map(id => relatedData?.find(p => p.id === id))
-              .filter(Boolean);
-            setRelatedPois(ordered);
-          } else {
-            setRelatedPois([]);
-          }
-        } else {
-          // No tags assigned yet → fall back to same-category POIs so the section isn't empty.
-          const { data: sameCategory } = await supabase
-            .from('pois')
-            .select('id, name, slug, category, tagline')
-            .eq('published', true)
-            .eq('category', match.category)
-            .neq('id', match.id)
-            .limit(4);
-          setRelatedPois(sameCategory || []);
-        }
-      }
-
-      setLoading(false);
-    }
-
-    if (slug) fetchEverything();
-  }, [slug]);
-
-  // ---------- Loading state ----------
-  if (loading) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontFamily: "'Fraunces', serif",
-        fontSize: '20px',
-        color: '#888',
-        background: '#f8f7f4',
-        padding: '20px',
-      }}>
-        Loading...
-      </div>
-    );
+  if (!poi) {
+    return { title: { absolute: 'Place not found | Open Road Guide' } };
   }
 
+  const title = `${poi.name} | Open Road Guide`;
+  const description =
+    poi.meta_description ||
+    poi.tagline ||
+    (poi.description
+      ? poi.description.slice(0, 155)
+      : `Visit ${poi.name} on your Utah road trip.`);
+  const url = `https://openroadguide.com/poi/${slug}`;
+
+  return {
+    title: { absolute: title },
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      title,
+      description,
+      type: 'article',
+      url,
+    },
+  };
+}
+
+export default async function PoiDetailPage({ params }) {
+  const { slug } = await params;
+
+  // 1. Fetch the POI (db-slug fast path, then name-derived fallback).
+  const poi = await fetchPoiBySlug(slug, '*');
+
   // ---------- Not found state ----------
-  if (notFound) {
+  if (!poi) {
     return (
       <div style={{
         minHeight: '100vh',
@@ -348,6 +146,151 @@ export default function PoiDetailPage() {
         </a>
       </div>
     );
+  }
+
+  // 2. Fetch tags for this POI, joined with tag_categories so we can color them.
+  //    Tags are needed up front because the theme-based "related" fallback
+  //    (when geo-nearby is unavailable) ranks by shared-tag overlap.
+  const { data: poiTagRows } = await supabase
+    .from('poi_tags')
+    .select(`
+      tag:tags (
+        id,
+        slug,
+        name,
+        description,
+        category:tag_categories ( slug, name )
+      )
+    `)
+    .eq('poi_id', poi.id);
+
+  const tags = (poiTagRows || [])
+    .map((row) => row.tag)
+    .filter(Boolean);
+
+  // 3. Fetch stories, regions, and geo-nearby POIs in parallel.
+  const [{ data: storyRows }, { data: regionRows }, nearbyRes] = await Promise.all([
+    // Stories that feature this POI via the story_pois join table.
+    supabase
+      .from('story_pois')
+      .select(`
+        story:stories (
+          id,
+          slug,
+          title,
+          subtitle,
+          excerpt,
+          story_type,
+          hero_image_url,
+          hero_image_alt,
+          reading_time_minutes,
+          author_name,
+          published,
+          published_at,
+          created_at
+        )
+      `)
+      .eq('poi_id', poi.id),
+
+    // Region(s) this POI belongs to, via the region_pois join table.
+    supabase
+      .from('region_pois')
+      .select(`
+        region:regions (
+          slug,
+          name,
+          published
+        )
+      `)
+      .eq('poi_id', poi.id),
+
+    // NEARBY POIs by geographic distance (primary path). Calls nearby_pois(),
+    // which ranks all other published POIs by great-circle distance. Only
+    // attempted when this POI has a slug and coordinates.
+    (poi.slug && poi.latitude != null && poi.longitude != null)
+      ? supabase.rpc('nearby_pois', { target_slug: poi.slug, max_results: 6 })
+      : Promise.resolve({ data: null }),
+  ]);
+
+  // Stories: only published, newest first (published_at, falling back to created_at).
+  const stories = (storyRows || [])
+    .map((row) => row.story)
+    .filter((s) => s && s.published)
+    .sort((a, b) => {
+      const aDate = a.published_at || a.created_at;
+      const bDate = b.published_at || b.created_at;
+      return new Date(bDate) - new Date(aDate);
+    });
+
+  // Regions: only published, alphabetical.
+  const regions = (regionRows || [])
+    .map((row) => row.region)
+    .filter((r) => r && r.published)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  // 4. Resolve the "Nearby / Related" list. Prefer geographic results; fall
+  //    back to theme-based (shared tags, then same category) only when geo is
+  //    unavailable or empty — mirroring the original client logic exactly.
+  let relatedPois = [];
+  let nearbyIsGeo = false;
+
+  const nearbyData = nearbyRes?.data;
+  if (nearbyData && nearbyData.length > 0) {
+    const withDistance = nearbyData.filter((p) => p.distance_miles != null);
+    if (withDistance.length > 0) {
+      relatedPois = withDistance;
+      nearbyIsGeo = true;
+    }
+  }
+
+  if (!nearbyIsGeo) {
+    // ---- Fallback: original theme-based related stops ----
+    // Shared tags first (most-overlap wins), then same-category.
+    const myTagIds = tags.map((t) => t.id);
+
+    if (myTagIds.length > 0) {
+      // Every poi_tag row for any of my tags, excluding this POI itself.
+      const { data: sharedRows } = await supabase
+        .from('poi_tags')
+        .select('poi_id, tag_id')
+        .in('tag_id', myTagIds)
+        .neq('poi_id', poi.id);
+
+      // Tally overlap counts per POI.
+      const overlap = {};
+      (sharedRows || []).forEach((r) => {
+        overlap[r.poi_id] = (overlap[r.poi_id] || 0) + 1;
+      });
+
+      // Sort POIs by shared-tag count, take the top 4.
+      const topPoiIds = Object.entries(overlap)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([id]) => id);
+
+      if (topPoiIds.length > 0) {
+        const { data: relatedData } = await supabase
+          .from('pois')
+          .select('id, name, slug, category, tagline')
+          .eq('published', true)
+          .in('id', topPoiIds);
+
+        // Preserve the sort order from overlap counts.
+        relatedPois = topPoiIds
+          .map((id) => relatedData?.find((p) => p.id === id))
+          .filter(Boolean);
+      }
+    } else {
+      // No tags assigned yet → fall back to same-category POIs so the section isn't empty.
+      const { data: sameCategory } = await supabase
+        .from('pois')
+        .select('id, name, slug, category, tagline')
+        .eq('published', true)
+        .eq('category', poi.category)
+        .neq('id', poi.id)
+        .limit(4);
+      relatedPois = sameCategory || [];
+    }
   }
 
   // ---------- Main render ----------
@@ -528,7 +471,7 @@ export default function PoiDetailPage() {
               gap: '8px',
               marginTop: poi.tagline ? '0' : '20px',
             }}>
-              {tags.map(tag => {
+              {tags.map((tag) => {
                 const tagCategorySlug = tag.category?.slug || 'practical';
                 const colors = getTagColors(tagCategorySlug);
                 return (
@@ -730,12 +673,7 @@ export default function PoiDetailPage() {
             overflow: 'hidden',
             border: '1.5px solid #e8e6e1',
           }}>
-            <MapView
-              pois={[poi]}
-              interactive={true}
-              height="350px"
-              compact={true}
-            />
+            <PoiMap poi={poi} />
           </div>
         </section>
 
