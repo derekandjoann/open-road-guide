@@ -206,90 +206,160 @@ export default async function RegionPage({ params }) {
   // Catch any categories not in the predefined order
   places.forEach((p) => pushGroup(p.category || 'attraction'));
 
+  // Structured data (JSON-LD): CollectionPage (with an ItemList of the
+  // region's POIs) + BreadcrumbList. Emitted as a server-rendered <script>
+  // so crawlers and AI answer engines can read a machine-readable summary of
+  // the region and the places it collects alongside the visible prose.
+  const pageUrl = `https://openroadguide.com/region/${slug}`;
+  const ldDescription =
+    region.meta_description ||
+    region.short_description ||
+    `Explore ${region.name} — a complete regional guide with the places worth stopping for.`;
+
+  const collectionLd = {
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: region.name,
+    description: ldDescription,
+    inLanguage: 'en-US',
+    url: pageUrl,
+    isPartOf: {
+      '@type': 'WebSite',
+      name: 'Open Road Guide',
+      url: 'https://openroadguide.com',
+    },
+    ...(region.hero_image_url ? { image: [region.hero_image_url] } : {}),
+    ...(places.length > 0
+      ? {
+          mainEntity: {
+            '@type': 'ItemList',
+            numberOfItems: places.length,
+            itemListElement: places.map((p, i) => ({
+              '@type': 'ListItem',
+              position: i + 1,
+              url: `https://openroadguide.com/poi/${p.slug || toSlug(p.name)}`,
+              name: p.name,
+            })),
+          },
+        }
+      : {}),
+  };
+
+  const breadcrumbLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      {
+        '@type': 'ListItem',
+        position: 1,
+        name: 'Home',
+        item: 'https://openroadguide.com/',
+      },
+      {
+        '@type': 'ListItem',
+        position: 2,
+        name: region.name,
+        item: pageUrl,
+      },
+    ],
+  };
+
+  // Escape "<" so a stray "</script>" in any field can't break out of the tag.
+  const jsonLd = JSON.stringify([collectionLd, breadcrumbLd]).replace(
+    /</g,
+    '\\u003c'
+  );
+
   return (
-    <main style={styles.main}>
-      <nav style={styles.breadcrumb}>
-        <Link href="/" style={styles.crumbLink}>
-          Home
-        </Link>
-        <span style={styles.crumbSep}>›</span>
-        <span style={styles.crumbCurrent}>{region.name}</span>
-      </nav>
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLd }}
+      />
+      <main style={styles.main}>
+        <nav style={styles.breadcrumb}>
+          <Link href="/" style={styles.crumbLink}>
+            Home
+          </Link>
+          <span style={styles.crumbSep}>›</span>
+          <span style={styles.crumbCurrent}>{region.name}</span>
+        </nav>
 
-      {/* Hero */}
-      <header style={styles.hero}>
-        {region.state && (
-          <div style={styles.eyebrow}>{region.state} · Region</div>
-        )}
-        <h1 style={styles.title}>{region.name}</h1>
-        {region.short_description && (
-          <p style={styles.tagline}>{region.short_description}</p>
-        )}
-        {places.length > 0 && (
-          <div style={styles.placeCount}>
-            {places.length} {places.length === 1 ? 'place' : 'places'} to explore
-          </div>
-        )}
-      </header>
-
-      {/* Long-form intro */}
-      {paragraphs.length > 0 && (
-        <section style={styles.intro}>
-          {paragraphs.map((p, i) => (
-            <p key={i} style={styles.introPara}>
-              {renderInline(p)}
-            </p>
-          ))}
-        </section>
-      )}
-
-      {/* Places, grouped by category */}
-      {places.length > 0 && (
-        <section style={styles.placesSection}>
-          <h2 style={styles.placesHeading}>What to See in {region.name}</h2>
-          <p style={styles.placesSub}>
-            {places.length} places across the region, grouped by what they are.
-          </p>
-
-          {grouped.map((group) => (
-            <div key={group.category} style={styles.categoryGroup}>
-              <h3 style={styles.categoryHeading}>{group.label}</h3>
-              <div style={styles.placesGrid}>
-                {group.items.map((place) => (
-                  <Link
-                    key={place.id}
-                    href={`/poi/${place.slug || toSlug(place.name)}`}
-                    style={styles.placeCard}
-                  >
-                    <div style={styles.placeHeader}>
-                      <h4 style={styles.placeName}>{place.name}</h4>
-                      {place.nearest_city && (
-                        <div style={styles.placeCity}>{place.nearest_city}</div>
-                      )}
-                    </div>
-                    {place.tagline && (
-                      <p style={styles.placeTagline}>{place.tagline}</p>
-                    )}
-                    <div style={styles.placeCta}>View details →</div>
-                  </Link>
-                ))}
-              </div>
+        {/* Hero */}
+        <header style={styles.hero}>
+          {region.state && (
+            <div style={styles.eyebrow}>{region.state} · Region</div>
+          )}
+          <h1 style={styles.title}>{region.name}</h1>
+          {region.short_description && (
+            <p style={styles.tagline}>{region.short_description}</p>
+          )}
+          {places.length > 0 && (
+            <div style={styles.placeCount}>
+              {places.length} {places.length === 1 ? 'place' : 'places'} to explore
             </div>
-          ))}
-        </section>
-      )}
+          )}
+        </header>
 
-      {/* Closing callout */}
-      <section style={styles.closing}>
-        <p style={styles.closingText}>
-          {region.name} rewards the unhurried. Pick a base, fan out, and let the
-          country between the headline stops surprise you.
-        </p>
-        <Link href="/" style={styles.closingLink}>
-          ← Explore more of Open Road Guide
-        </Link>
-      </section>
-    </main>
+        {/* Long-form intro */}
+        {paragraphs.length > 0 && (
+          <section style={styles.intro}>
+            {paragraphs.map((p, i) => (
+              <p key={i} style={styles.introPara}>
+                {renderInline(p)}
+              </p>
+            ))}
+          </section>
+        )}
+
+        {/* Places, grouped by category */}
+        {places.length > 0 && (
+          <section style={styles.placesSection}>
+            <h2 style={styles.placesHeading}>What to See in {region.name}</h2>
+            <p style={styles.placesSub}>
+              {places.length} places across the region, grouped by what they are.
+            </p>
+
+            {grouped.map((group) => (
+              <div key={group.category} style={styles.categoryGroup}>
+                <h3 style={styles.categoryHeading}>{group.label}</h3>
+                <div style={styles.placesGrid}>
+                  {group.items.map((place) => (
+                    <Link
+                      key={place.id}
+                      href={`/poi/${place.slug || toSlug(place.name)}`}
+                      style={styles.placeCard}
+                    >
+                      <div style={styles.placeHeader}>
+                        <h4 style={styles.placeName}>{place.name}</h4>
+                        {place.nearest_city && (
+                          <div style={styles.placeCity}>{place.nearest_city}</div>
+                        )}
+                      </div>
+                      {place.tagline && (
+                        <p style={styles.placeTagline}>{place.tagline}</p>
+                      )}
+                      <div style={styles.placeCta}>View details →</div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {/* Closing callout */}
+        <section style={styles.closing}>
+          <p style={styles.closingText}>
+            {region.name} rewards the unhurried. Pick a base, fan out, and let the
+            country between the headline stops surprise you.
+          </p>
+          <Link href="/" style={styles.closingLink}>
+            ← Explore more of Open Road Guide
+          </Link>
+        </section>
+      </main>
+    </>
   );
 }
 
