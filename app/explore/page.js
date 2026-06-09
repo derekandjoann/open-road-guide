@@ -17,6 +17,17 @@ export default function ExplorePage() {
   const [searchResults, setSearchResults] = useState(null);
   const [selectedPoi, setSelectedPoi] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Mobile layout switch: stack map over list below 768px. matchMedia with a
+  // change listener keeps it correct through rotation; initial false avoids
+  // SSR/window access issues since this only renders meaningfully client-side.
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
   const listRef = useRef(null);
 
   // Fetch POIs
@@ -197,13 +208,19 @@ export default function ExplorePage() {
         })}
       </div>
 
-      {/* Map + Sidebar */}
+      {/* Map + Sidebar — side-by-side on desktop, stacked on mobile */}
       <div style={{
         display: 'flex',
-        height: 'calc(100vh - 130px)',
+        flexDirection: isMobile ? 'column' : 'row',
+        height: isMobile ? 'auto' : 'calc(100vh - 130px)',
       }}>
         {/* Map */}
-        <div style={{ flex: 1, position: 'relative' }}>
+        <div style={{
+          flex: isMobile ? 'none' : 1,
+          position: 'relative',
+          height: isMobile ? '52vh' : 'auto',
+          minHeight: isMobile ? '320px' : 0,
+        }}>
           {loading ? (
             <div style={{
               display: 'flex',
@@ -251,10 +268,11 @@ export default function ExplorePage() {
         <div
           ref={listRef}
           style={{
-            width: '360px',
-            overflowY: 'auto',
+            width: isMobile ? '100%' : '360px',
+            overflowY: isMobile ? 'visible' : 'auto',
             background: '#fff',
-            borderLeft: '1px solid #e8e6e1',
+            borderLeft: isMobile ? 'none' : '1px solid #e8e6e1',
+            borderTop: isMobile ? '1px solid #e8e6e1' : 'none',
           }}
         >
           <div style={{
