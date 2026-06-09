@@ -11,6 +11,10 @@ export default function ExplorePage() {
   const [categories, setCategories] = useState([]);
   const [activeCategory, setActiveCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
+  // Ranked results from the search_pois() full-text RPC. null = RPC inactive
+  // (query empty/too short, still in flight, or errored) — in that case the
+  // legacy substring filter below applies, so search never breaks.
+  const [searchResults, setSearchResults] = useState(null);
   const [selectedPoi, setSelectedPoi] = useState(null);
   const [loading, setLoading] = useState(true);
   const listRef = useRef(null);
@@ -36,22 +40,59 @@ export default function ExplorePage() {
     fetchPois();
   }, []);
 
+  // Full-text search via the search_pois() RPC — debounced, race-safe.
+  // Matches words anywhere in a POI's name, tagline, or full description
+  // (with English stemming), ranked by relevance. Queries shorter than three
+  // characters skip the RPC; the substring filter handles those better.
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 3) {
+      setSearchResults(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const { data, error } = await supabase.rpc('search_pois', {
+        search_query: q,
+        max_results: 100,
+      });
+      if (cancelled) return;
+      if (error) {
+        console.error('search_pois error:', error);
+        setSearchResults(null); // fall back to substring filtering
+      } else {
+        setSearchResults(data || []);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery]);
+
   // Filter
   useEffect(() => {
     let result = pois;
+    if (searchQuery.trim()) {
+      if (searchResults !== null) {
+        // Ranked full-text results: map RPC ids back to the fully loaded POI
+        // objects so cards and map markers keep every field, in rank order.
+        const byId = new Map(pois.map(p => [p.id, p]));
+        result = searchResults.map(r => byId.get(r.id)).filter(Boolean);
+      } else {
+        const q = searchQuery.toLowerCase();
+        result = result.filter(p =>
+          p.name.toLowerCase().includes(q) ||
+          (p.tagline && p.tagline.toLowerCase().includes(q)) ||
+          (p.category && p.category.toLowerCase().includes(q))
+        );
+      }
+    }
     if (activeCategory !== 'All') {
       result = result.filter(p => p.category === activeCategory);
     }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(p =>
-        p.name.toLowerCase().includes(q) ||
-        (p.tagline && p.tagline.toLowerCase().includes(q)) ||
-        (p.category && p.category.toLowerCase().includes(q))
-      );
-    }
     setFilteredPois(result);
-  }, [activeCategory, searchQuery, pois]);
+  }, [activeCategory, searchQuery, searchResults, pois]);
 
   // Scroll to selected POI
   useEffect(() => {
@@ -97,7 +138,7 @@ export default function ExplorePage() {
         <div style={{ position: 'relative', width: '280px', maxWidth: '100%' }}>
           <input
             type="text"
-            placeholder="Search places..."
+            placeholder="Search places, stories, geology..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{
