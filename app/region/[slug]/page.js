@@ -25,7 +25,7 @@ function heroSrc(url, width = 1600) {
     '/storage/v1/object/public/',
     '/storage/v1/render/image/public/'
   );
-  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&quality=72`;
+  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
 }
 
 // Open Road Guide brand palette
@@ -440,8 +440,7 @@ const styles = {
   heroImage: {
     display: 'block',
     width: '100%',
-    aspectRatio: '16 / 9',
-    objectFit: 'cover',
+    height: 'auto',
     borderRadius: '16px',
     backgroundColor: COLORS.paper,
     boxShadow: '0 6px 24px rgba(26, 26, 46, 0.10)',
