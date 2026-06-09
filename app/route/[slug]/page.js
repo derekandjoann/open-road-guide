@@ -22,6 +22,20 @@ const toSlug = (s) =>
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-') || '';
 
+// Serve a right-sized, optimized hero from Supabase's image render endpoint
+// instead of the multi-megabyte original (e.g. a 7.6 MB JPEG comes down to
+// ~0.5 MB at width 1600). Falls back to the original URL untouched if it isn't
+// in the expected public-object form, so a non-Supabase URL still works.
+function heroSrc(url, width = 1600) {
+  if (!url) return '';
+  if (!url.includes('/storage/v1/object/public/')) return url;
+  const base = url.replace(
+    '/storage/v1/object/public/',
+    '/storage/v1/render/image/public/'
+  );
+  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&quality=72`;
+}
+
 // Open Road Guide brand palette
 const COLORS = {
   coral: '#FF6B6B',
@@ -117,7 +131,7 @@ export async function generateMetadata({ params }) {
       description,
       type: 'article',
       url,
-      ...(route.hero_image_url ? { images: [route.hero_image_url] } : {}),
+      ...(route.hero_image_url ? { images: [heroSrc(route.hero_image_url, 1200)] } : {}),
     },
   };
 }
@@ -238,6 +252,23 @@ export default async function RoutePage({ params }) {
         <span style={styles.crumbSep}>›</span>
         <span style={styles.crumbCurrent}>{route.name}</span>
       </nav>
+
+      {/* Hero image banner */}
+      {route.hero_image_url && (
+        <figure style={styles.heroFigure}>
+          <img
+            src={heroSrc(route.hero_image_url)}
+            alt={route.name}
+            style={styles.heroImage}
+            loading="eager"
+          />
+          {route.hero_image_credit && (
+            <figcaption style={styles.heroCredit}>
+              {renderInline(route.hero_image_credit)}
+            </figcaption>
+          )}
+        </figure>
+      )}
 
       {/* Hero */}
       <header style={styles.hero}>
@@ -394,6 +425,26 @@ const styles = {
   crumbLink: { color: COLORS.warmGray, textDecoration: 'none' },
   crumbSep: { color: '#bbb' },
   crumbCurrent: { color: COLORS.ink, fontWeight: 500 },
+
+  heroFigure: {
+    margin: '0 0 2rem 0',
+  },
+  heroImage: {
+    display: 'block',
+    width: '100%',
+    aspectRatio: '16 / 9',
+    objectFit: 'cover',
+    borderRadius: '16px',
+    backgroundColor: COLORS.paper,
+    boxShadow: '0 6px 24px rgba(26, 26, 46, 0.10)',
+  },
+  heroCredit: {
+    fontSize: '0.72rem',
+    color: COLORS.warmGray,
+    marginTop: '0.5rem',
+    textAlign: 'right',
+    letterSpacing: '0.01em',
+  },
 
   hero: {
     marginBottom: '3rem',
