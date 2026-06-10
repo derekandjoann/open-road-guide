@@ -8,6 +8,8 @@ import { getCategoryColor } from '../lib/categoryColors';
 export default function MapView({
   pois = [],
   historicalMarkers = [],
+  routeLine = null,
+  markerColor = null,
   interactive = true,
   height = '500px',
   onMarkerClick = null,
@@ -71,6 +73,55 @@ export default function MapView({
     };
   }, [interactive]);
 
+  // Route line — the road itself, drawn as a GeoJSON LineString from
+  // routes.path_geojson ([lng, lat] pairs traced from OSM). Two layers make
+  // the classic map-cartography treatment: a white casing underneath gives
+  // the coral line a crisp edge against the busy raster basemap. Layers sit
+  // below the DOM-based markers automatically (markers are HTML elements,
+  // not map layers), so pins always render on top of the line.
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+
+    const map = mapRef.current;
+    const hasLine = Array.isArray(routeLine) && routeLine.length > 1;
+
+    if (!hasLine) {
+      if (map.getLayer('route-line')) map.removeLayer('route-line');
+      if (map.getLayer('route-line-casing')) map.removeLayer('route-line-casing');
+      if (map.getSource('route-line')) map.removeSource('route-line');
+      return;
+    }
+
+    const lineData = {
+      type: 'Feature',
+      properties: {},
+      geometry: {
+        type: 'LineString',
+        coordinates: routeLine,
+      },
+    };
+
+    if (map.getSource('route-line')) {
+      map.getSource('route-line').setData(lineData);
+    } else {
+      map.addSource('route-line', { type: 'geojson', data: lineData });
+      map.addLayer({
+        id: 'route-line-casing',
+        type: 'line',
+        source: 'route-line',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#FFFFFF', 'line-width': 7 },
+      });
+      map.addLayer({
+        id: 'route-line',
+        type: 'line',
+        source: 'route-line',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#FF6B6B', 'line-width': 4 },
+      });
+    }
+  }, [routeLine, mapLoaded]);
+
   // Add markers when map is loaded and POIs change
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return;
@@ -81,12 +132,10 @@ export default function MapView({
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
 
-    if (pois.length === 0) return;
-
     pois.forEach((poi) => {
       if (!poi.longitude || !poi.latitude) return;
 
-      const color = getCategoryColor(poi.category);
+      const color = markerColor || getCategoryColor(poi.category);
 
       const categoryLabel = poi.category
         ? poi.category.charAt(0).toUpperCase() + poi.category.slice(1)
@@ -148,17 +197,31 @@ export default function MapView({
       markersRef.current.push(marker);
     });
 
-    // Fit bounds
-    if (pois.length > 1) {
-      const bounds = new maplibregl.LngLatBounds();
-      pois.forEach((poi) => {
-        if (poi.longitude && poi.latitude) {
-          bounds.extend([poi.longitude, poi.latitude]);
+    // Fit bounds around everything that frames the drive: the stop pins and,
+    // when present, every coordinate of the route line — so a road that arcs
+    // well beyond its endpoints (a canyon switchback, a loop) never gets
+    // clipped at the map edge. Historical markers still stay out of bounds
+    // math; they're roadside texture, not framing.
+    const bounds = new maplibregl.LngLatBounds();
+    let boundPoints = 0;
+    pois.forEach((poi) => {
+      if (poi.longitude && poi.latitude) {
+        bounds.extend([poi.longitude, poi.latitude]);
+        boundPoints += 1;
+      }
+    });
+    if (Array.isArray(routeLine)) {
+      routeLine.forEach((coord) => {
+        if (Array.isArray(coord) && coord.length >= 2) {
+          bounds.extend([coord[0], coord[1]]);
+          boundPoints += 1;
         }
       });
+    }
+    if (boundPoints > 1) {
       map.fitBounds(bounds, { padding: 50, maxZoom: 12 });
     }
-  }, [pois, mapLoaded, compact, onMarkerClick]);
+  }, [pois, routeLine, mapLoaded, compact, markerColor, onMarkerClick]);
 
   // Historical marker layer — smaller violet pins, separate from POI markers.
   // These are roadside texture: they never participate in fitBounds (the POIs
