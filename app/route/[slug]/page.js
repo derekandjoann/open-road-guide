@@ -174,6 +174,19 @@ export default async function RoutePage({ params }) {
     .filter((s) => s.poi && s.poi.published !== false)
     .map((s) => ({ ...s.poi, order_index: s.order_index, route_notes: s.notes }));
 
+  // Historical markers tied to this route — roadside plaques and monuments.
+  // These are texture, not stops: no individual pages, just name, note, and
+  // who put them there. Rendered as a compact grid below the drive.
+  const { data: markerData } = await supabase
+    .from('route_markers')
+    .select('marker:markers(id, name, erected_by, year_erected, note)')
+    .eq('route_id', route.id);
+
+  const histMarkers = (markerData || [])
+    .map((m) => m.marker)
+    .filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   // Split description into paragraphs
   const paragraphs = (route.description || '')
     .split(/\n\n+/)
@@ -371,6 +384,31 @@ export default async function RoutePage({ params }) {
           })}
         </ol>
       </section>
+
+      {/* Historical markers along the corridor */}
+      {histMarkers.length > 0 && (
+        <section style={styles.markersSection}>
+          <h2 style={styles.markersHeading}>Markers Along This Road</h2>
+          <p style={styles.markersSub}>
+            Roadside plaques and monuments worth a pull-over — small history,
+            standing exactly where it happened.
+          </p>
+          <div style={styles.markersGrid}>
+            {histMarkers.map((m) => (
+              <div key={m.id} style={styles.markerCard}>
+                <div style={styles.markerEyebrow}>Historical Marker</div>
+                <h3 style={styles.markerName}>{m.name}</h3>
+                {m.note && <p style={styles.markerNote}>{m.note}</p>}
+                {(m.erected_by || m.year_erected) && (
+                  <div style={styles.markerMeta}>
+                    {[m.erected_by, m.year_erected].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Closing callout */}
       <section style={styles.closing}>
@@ -621,6 +659,61 @@ const styles = {
     fontSize: '0.85rem',
     fontWeight: 600,
     color: COLORS.coral,
+    letterSpacing: '0.02em',
+  },
+
+  markersSection: { marginBottom: '4rem' },
+  markersHeading: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: 'clamp(1.5rem, 4vw, 2.1rem)',
+    fontWeight: 600,
+    marginBottom: '0.5rem',
+    color: COLORS.ink,
+  },
+  markersSub: {
+    fontSize: '1rem',
+    color: COLORS.warmGray,
+    marginBottom: '1.75rem',
+    lineHeight: 1.5,
+    maxWidth: '40rem',
+  },
+  markersGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 290px), 1fr))',
+    gap: '1rem',
+  },
+  markerCard: {
+    padding: '1.1rem 1.25rem',
+    background: COLORS.paper,
+    borderRadius: '12px',
+    borderLeft: `3px solid ${COLORS.violet}`,
+  },
+  markerEyebrow: {
+    fontSize: '0.7rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: COLORS.violet,
+    marginBottom: '0.4rem',
+  },
+  markerName: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: '1.1rem',
+    fontWeight: 600,
+    margin: '0 0 0.5rem 0',
+    color: COLORS.ink,
+    lineHeight: 1.3,
+    wordBreak: 'break-word',
+  },
+  markerNote: {
+    fontSize: '0.92rem',
+    lineHeight: 1.55,
+    color: '#444',
+    margin: '0 0 0.5rem 0',
+  },
+  markerMeta: {
+    fontSize: '0.78rem',
+    color: COLORS.warmGray,
     letterSpacing: '0.02em',
   },
 
