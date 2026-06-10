@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
+import MapView from '../../../components/MapView';
 
 // Render every route on demand (server-side) rather than statically at build
 // time, matching the POI page. Route descriptions and route_pois editorial
@@ -165,7 +166,7 @@ export default async function RoutePage({ params }) {
   const { data: stopData } = await supabase
     .from('route_pois')
     .select(
-      'order_index, notes, poi:pois(id, name, slug, tagline, description, nearest_city, nearest_highway, category, thumbnail_url, published)'
+      'order_index, notes, poi:pois(id, name, slug, tagline, description, nearest_city, nearest_highway, category, thumbnail_url, published, latitude, longitude, visit_duration)'
     )
     .eq('route_id', route.id)
     .order('order_index', { ascending: true });
@@ -179,13 +180,32 @@ export default async function RoutePage({ params }) {
   // who put them there. Rendered as a compact grid below the drive.
   const { data: markerData } = await supabase
     .from('route_markers')
-    .select('marker:markers(id, name, erected_by, year_erected, note)')
+    .select('marker:markers(id, name, erected_by, year_erected, note, latitude, longitude)')
     .eq('route_id', route.id);
 
   const histMarkers = (markerData || [])
     .map((m) => m.marker)
     .filter(Boolean)
     .sort((a, b) => a.name.localeCompare(b.name));
+
+  // The route's road geometry — [lng, lat] pairs traced from OSM and stored
+  // in routes.path_geojson. The at-a-glance map only renders when it exists.
+  const hasRouteLine =
+    Array.isArray(route.path_geojson) && route.path_geojson.length > 1;
+
+  // Slim copies of the stops for the map. MapView is a client component, so
+  // everything passed as props ships to the browser in the page payload —
+  // the full description prose would bloat it for no reason. The popups only
+  // need name, tagline, category, duration, and a place to stand.
+  const mapStops = stops.map((s) => ({
+    id: s.id,
+    name: s.name,
+    tagline: s.tagline,
+    category: s.category,
+    latitude: s.latitude,
+    longitude: s.longitude,
+    visit_duration: s.visit_duration,
+  }));
 
   // Split description into paragraphs
   const paragraphs = (route.description || '')
@@ -331,6 +351,37 @@ export default async function RoutePage({ params }) {
           )}
         </div>
       </header>
+
+      {/* The route at a glance — the road drawn on the map, with every stop
+          pinned along it. Only renders for routes with traced geometry. */}
+      {hasRouteLine && (
+        <section style={styles.mapSection}>
+          <h2 style={styles.mapHeading}>The Route at a Glance</h2>
+          <MapView
+            pois={mapStops}
+            historicalMarkers={histMarkers}
+            routeLine={route.path_geojson}
+            markerColor={COLORS.coral}
+            height="460px"
+          />
+          <div style={styles.mapLegend}>
+            <span style={styles.legendItem}>
+              <span style={styles.legendLine} />
+              The road
+            </span>
+            <span style={styles.legendItem}>
+              <span style={{ ...styles.legendDot, background: COLORS.coral }} />
+              Stops
+            </span>
+            {histMarkers.length > 0 && (
+              <span style={styles.legendItem}>
+                <span style={{ ...styles.legendDot, background: COLORS.violet }} />
+                Historical markers
+              </span>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Long-form intro */}
       {paragraphs.length > 0 && (
@@ -538,6 +589,44 @@ const styles = {
     fontSize: '1rem',
     fontWeight: 600,
     color: COLORS.ink,
+  },
+
+  mapSection: { marginBottom: '4rem' },
+  mapHeading: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: 'clamp(1.5rem, 4vw, 2.1rem)',
+    fontWeight: 600,
+    marginBottom: '1.25rem',
+    color: COLORS.ink,
+  },
+  mapLegend: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '1.5rem',
+    marginTop: '0.85rem',
+    fontSize: '0.85rem',
+    color: COLORS.warmGray,
+    fontWeight: 500,
+  },
+  legendItem: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+  },
+  legendLine: {
+    display: 'inline-block',
+    width: '26px',
+    height: '4px',
+    borderRadius: '2px',
+    background: COLORS.coral,
+    boxShadow: '0 0 0 1.5px #fff, 0 0 0 2.5px #e5e5e5',
+  },
+  legendDot: {
+    display: 'inline-block',
+    width: '11px',
+    height: '11px',
+    borderRadius: '50%',
+    flexShrink: 0,
   },
 
   intro: {
