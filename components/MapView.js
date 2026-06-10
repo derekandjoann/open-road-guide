@@ -7,6 +7,7 @@ import { getCategoryColor } from '../lib/categoryColors';
 
 export default function MapView({
   pois = [],
+  historicalMarkers = [],
   interactive = true,
   height = '500px',
   onMarkerClick = null,
@@ -15,6 +16,7 @@ export default function MapView({
   const mapContainer = useRef(null);
   const mapRef = useRef(null);
   const markersRef = useRef([]);
+  const histMarkersRef = useRef([]);
   const [mapLoaded, setMapLoaded] = useState(false);
 
   useEffect(() => {
@@ -157,6 +159,74 @@ export default function MapView({
       map.fitBounds(bounds, { padding: 50, maxZoom: 12 });
     }
   }, [pois, mapLoaded, compact, onMarkerClick]);
+
+  // Historical marker layer — smaller violet pins, separate from POI markers.
+  // These are roadside texture: they never participate in fitBounds (the POIs
+  // frame the map; markers just appear where they stand), and they use the
+  // same built-in maplibregl.Marker as POIs to avoid the custom-HTML
+  // positioning bug.
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+
+    const map = mapRef.current;
+
+    histMarkersRef.current.forEach((m) => m.remove());
+    histMarkersRef.current = [];
+
+    historicalMarkers.forEach((hm) => {
+      if (!hm.longitude || !hm.latitude) return;
+
+      const meta = [hm.erected_by, hm.year_erected].filter(Boolean).join(' · ');
+
+      const popupHTML = `
+        <div style="font-family: 'Outfit', sans-serif; max-width: 220px; padding: 4px;">
+          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+            <span style="
+              display: inline-block;
+              width: 10px; height: 10px;
+              background: #9D4EDD;
+              border-radius: 50%;
+              flex-shrink: 0;
+            "></span>
+            <span style="
+              font-size: 11px;
+              font-weight: 600;
+              color: #9D4EDD;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+            ">Historical Marker</span>
+          </div>
+          <div style="
+            font-family: 'Fraunces', serif;
+            font-size: 15px;
+            font-weight: 700;
+            color: #1a1a2e;
+            margin-bottom: 4px;
+            line-height: 1.25;
+          ">${hm.name}</div>
+          ${hm.note ? `<div style="font-size: 13px; color: #555; line-height: 1.4;">${hm.note}</div>` : ''}
+          ${meta ? `<div style="font-size: 11px; color: #888; margin-top: 6px;">${meta}</div>` : ''}
+        </div>
+      `;
+
+      const popup = new maplibregl.Popup({
+        offset: 18,
+        closeButton: true,
+        closeOnClick: true,
+        maxWidth: '260px',
+      }).setHTML(popupHTML);
+
+      const marker = new maplibregl.Marker({
+        color: '#9D4EDD',
+        scale: compact ? 0.45 : 0.55,
+      })
+        .setLngLat([hm.longitude, hm.latitude])
+        .setPopup(popup)
+        .addTo(map);
+
+      histMarkersRef.current.push(marker);
+    });
+  }, [historicalMarkers, mapLoaded, compact]);
 
   return (
     <div
