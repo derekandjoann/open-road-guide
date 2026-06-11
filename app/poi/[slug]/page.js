@@ -84,14 +84,14 @@ export async function generateMetadata({ params }) {
 
   const poi = await fetchPoiBySlug(
     slug,
-    'name, tagline, meta_description, description'
+    'name, seo_title, tagline, meta_description, description'
   );
 
   if (!poi) {
     return { title: { absolute: 'Place not found | Open Road Guide' } };
   }
 
-  const title = `${poi.name} | Open Road Guide`;
+  const title = poi.seo_title || `${poi.name} | Open Road Guide`;
   const description =
     poi.meta_description ||
     poi.tagline ||
