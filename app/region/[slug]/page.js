@@ -361,6 +361,14 @@ export default async function RegionPage({ params }) {
                       href={`/poi/${place.slug || toSlug(place.name)}`}
                       style={styles.placeCard}
                     >
+                      {place.thumbnail_url && (
+                        <img
+                          src={heroSrc(place.thumbnail_url, 600)}
+                          alt={place.name}
+                          loading="lazy"
+                          style={styles.placeThumb}
+                        />
+                      )}
                       <div style={styles.placeHeader}>
                         <h4 style={styles.placeName}>{place.name}</h4>
                         {place.nearest_city && (
@@ -549,6 +557,22 @@ const styles = {
     transition:
       'transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease',
     cursor: 'pointer',
+    overflow: 'hidden',
+  },
+  // Card thumbnail. Pulled flush to the card edges with negative margins that
+  // cancel the card's padding, so the image meets the rounded top corners
+  // (overflow:hidden on the card clips it to the radius). A fixed-height cover
+  // crop is intentional here and safe: these small grid cards need uniform
+  // height, and the contain/zoom-bug caveat only applies to the large POI/region
+  // hero band, not to compact card crops.
+  placeThumb: {
+    display: 'block',
+    width: 'calc(100% + 2 * clamp(1rem, 2.5vw, 1.4rem))',
+    height: '150px',
+    objectFit: 'cover',
+    margin:
+      'calc(-1 * clamp(1rem, 2.5vw, 1.4rem)) calc(-1 * clamp(1rem, 2.5vw, 1.4rem)) clamp(0.9rem, 2vw, 1.1rem)',
+    background: '#f0ebe4',
   },
   placeHeader: {
     display: 'flex',
