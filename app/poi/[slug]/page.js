@@ -53,6 +53,21 @@ function toPlainText(md) {
     .trim();
 }
 
+// Build a transformed image URL for the POI hero band. Rewrites a Supabase
+// public-object URL to the on-the-fly render/image endpoint and requests a
+// width-bounded, contained render. resize=contain + height:'auto' on the <img>
+// avoids the double-crop zoom that aspectRatio+cover produces. A non-Supabase
+// URL (or anything not in the expected public-object form) is returned as-is.
+function heroImageSrc(url, width = 1600) {
+  if (!url) return null;
+  if (!url.includes('/storage/v1/object/public/')) return url;
+  const base = url.replace(
+    '/storage/v1/object/public/',
+    '/storage/v1/render/image/public/'
+  );
+  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
+}
+
 // Fetch a single published POI by its database slug (fast path), falling back
 // to scanning all published POIs and matching on a name-derived slug. The
 // fallback keeps older links working for any POI whose slug column doesn't
@@ -427,6 +442,35 @@ export default async function PoiDetailPage({ params }) {
         {' / '}
         <span style={{ color: '#1a1a2e', fontWeight: 600 }}>{poi.name}</span>
       </div>
+
+      {/* Hero photo band — renders only when this POI has a thumbnail.
+          POIs without one keep the clean navy gradient header below.
+          Uses the same proven pattern as the region/route heroes:
+          render/image with resize=contain + height:'auto' (natural aspect,
+          no objectFit cover / fixed aspectRatio) — that combination is what
+          avoids the double-crop zoom. Centered on a dark band so a portrait
+          frame letterboxes cleanly instead of cropping. */}
+      {poi.thumbnail_url && (
+        <section style={{
+          width: '100%',
+          background: '#0f0f1a',
+          display: 'flex',
+          justifyContent: 'center',
+          lineHeight: 0,
+        }}>
+          <img
+            src={heroImageSrc(poi.thumbnail_url)}
+            alt={poi.name}
+            loading="eager"
+            style={{
+              display: 'block',
+              width: '100%',
+              maxWidth: '1100px',
+              height: 'auto',
+            }}
+          />
+        </section>
+      )}
 
       {/* Hero */}
       <section style={{
