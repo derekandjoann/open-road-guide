@@ -5,6 +5,20 @@ import { supabase } from '../../lib/supabase';
 import MapView from '../../components/MapView';
 import { getCategoryColor, getCategoryEmoji } from '../../lib/categoryColors';
 import { toSlug } from '../../lib/slug'; 
+
+// Serve a small, right-sized thumbnail from Supabase's image render endpoint
+// rather than the multi-megabyte original. Falls back to the original URL
+// untouched if it isn't in the expected public-object form.
+function thumbSrc(url, width = 160) {
+  if (!url) return '';
+  if (!url.includes('/storage/v1/object/public/')) return url;
+  const base = url.replace(
+    '/storage/v1/object/public/',
+    '/storage/v1/render/image/public/'
+  );
+  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
+}
+
 export default function ExplorePage() {
   const [pois, setPois] = useState([]);
   const [filteredPois, setFilteredPois] = useState([]);
@@ -382,6 +396,23 @@ function PoiCard({ poi, isSelected, onClick }) {
         transition: 'all 0.15s ease',
       }}
     >
+      <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+        {poi.thumbnail_url && (
+          <img
+            src={thumbSrc(poi.thumbnail_url)}
+            alt={poi.name}
+            loading="lazy"
+            style={{
+              width: '60px',
+              height: '60px',
+              objectFit: 'cover',
+              borderRadius: '8px',
+              flexShrink: 0,
+              background: '#f0ebe4',
+            }}
+          />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
         <span style={{
           width: '8px', height: '8px',
@@ -431,6 +462,8 @@ function PoiCard({ poi, isSelected, onClick }) {
             textDecoration: 'none',
           }}
         >View Details →</a>
+      </div>
+        </div>
       </div>
     </div>
   );
