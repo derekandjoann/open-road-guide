@@ -458,17 +458,39 @@ export default async function PoiDetailPage({ params }) {
           justifyContent: 'center',
           lineHeight: 0,
         }}>
-          <img
-            src={heroImageSrc(poi.thumbnail_url)}
-            alt={poi.name}
-            loading="eager"
-            style={{
-              display: 'block',
-              width: '100%',
-              maxWidth: '1100px',
-              height: 'auto',
-            }}
-          />
+          <div style={{ position: 'relative', width: '100%', maxWidth: '1100px' }}>
+            <img
+              src={heroImageSrc(poi.thumbnail_url)}
+              alt={poi.name}
+              loading="eager"
+              style={{
+                display: 'block',
+                width: '100%',
+                height: 'auto',
+              }}
+            />
+            {/* Photo credit — renders only for images that carry an
+                attribution requirement (CC BY / CC BY-SA). Public-domain
+                thumbnails leave thumbnail_credit null and show nothing.
+                Overlaid bottom-right so it never disturbs the flush band. */}
+            {poi.thumbnail_credit && (
+              <span style={{
+                position: 'absolute',
+                right: '8px',
+                bottom: '8px',
+                padding: '3px 8px',
+                fontSize: '11px',
+                lineHeight: 1.3,
+                fontFamily: "'Outfit', sans-serif",
+                color: 'rgba(255,255,255,0.92)',
+                background: 'rgba(0,0,0,0.55)',
+                borderRadius: '4px',
+                letterSpacing: '0.01em',
+              }}>
+                {poi.thumbnail_credit}
+              </span>
+            )}
+          </div>
         </section>
       )}
 
