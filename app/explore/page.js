@@ -136,13 +136,16 @@ export default function ExplorePage() {
     setFilteredPois(result);
   }, [activeCategory, searchQuery, searchResults, pois]);
 
-  // Scroll to selected POI
+  // Scroll to selected POI. On mobile the map is a sticky pane pinned to the
+  // top of the page, so a tapped card must align to 'start' (its scroll-margin
+  // clears the pinned map) rather than 'center', which would land it behind
+  // the map. On desktop the sidebar scrolls internally, so 'center' is right.
   useEffect(() => {
     if (selectedPoi && listRef.current) {
       const el = listRef.current.querySelector(`[data-poi-id="${selectedPoi.id}"]`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: isMobile ? 'start' : 'center' });
     }
-  }, [selectedPoi]);
+  }, [selectedPoi, isMobile]);
 
   return (
     <div style={{
@@ -245,12 +248,17 @@ export default function ExplorePage() {
         flexDirection: isMobile ? 'column' : 'row',
         height: isMobile ? 'auto' : 'calc(100vh - 130px)',
       }}>
-        {/* Map */}
+        {/* Map — on mobile this is a sticky pane pinned just below the global
+            nav (sticky, 94px tall, z-index 100), so the card list scrolls
+            beneath a map that stays in view. z-index 20 sits above the cards
+            but below the nav. On desktop it's a normal flex pane. */}
         <div style={{
           flex: isMobile ? 'none' : 1,
-          position: 'relative',
-          height: isMobile ? '52vh' : 'auto',
-          minHeight: isMobile ? '320px' : 0,
+          position: isMobile ? 'sticky' : 'relative',
+          top: isMobile ? '94px' : 'auto',
+          zIndex: isMobile ? 20 : 'auto',
+          height: isMobile ? '45vh' : 'auto',
+          minHeight: isMobile ? '300px' : 0,
         }}>
           {loading ? (
             <div style={{
@@ -328,6 +336,7 @@ export default function ExplorePage() {
                 key={poi.id}
                 poi={poi}
                 isSelected={selectedPoi?.id === poi.id}
+                isMobile={isMobile}
                 onClick={() => setSelectedPoi(poi)}
               />
             ))
@@ -377,7 +386,7 @@ function FilterChip({ label, count, active, color, onClick }) {
 }
 
 /* Sidebar POI Card */
-function PoiCard({ poi, isSelected, onClick }) {
+function PoiCard({ poi, isSelected, isMobile, onClick }) {
   const color = getCategoryColor(poi.category);
   const label = poi.category
     ? poi.category.charAt(0).toUpperCase() + poi.category.slice(1)
@@ -394,6 +403,9 @@ function PoiCard({ poi, isSelected, onClick }) {
         background: isSelected ? '#faf9f7' : '#fff',
         borderLeft: isSelected ? `3px solid ${color}` : '3px solid transparent',
         transition: 'all 0.15s ease',
+        // Clears the sticky map (94px nav + 45vh map) when scrollIntoView
+        // aligns this card to 'start' on mobile; harmless on desktop.
+        scrollMarginTop: isMobile ? 'calc(94px + 45vh + 10px)' : undefined,
       }}
     >
       <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
