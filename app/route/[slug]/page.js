@@ -188,6 +188,27 @@ export default async function RoutePage({ params }) {
     .filter(Boolean)
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  // Stories that feature this drive, via the story_routes join table. This is
+  // the reverse of the POI page's "Stories featuring this place" (story_pois):
+  // it lets a reader move from the route into the long-form pieces that walk
+  // it, instead of that link only working one way. Published only, newest
+  // first (published_at, falling back to created_at).
+  const { data: storyRows } = await supabase
+    .from('story_routes')
+    .select(
+      'story:stories(id, slug, title, story_type, hero_image_url, hero_image_alt, reading_time_minutes, author_name, published, published_at, created_at)'
+    )
+    .eq('route_id', route.id);
+
+  const stories = (storyRows || [])
+    .map((row) => row.story)
+    .filter((s) => s && s.published)
+    .sort((a, b) => {
+      const aDate = a.published_at || a.created_at;
+      const bDate = b.published_at || b.created_at;
+      return new Date(bDate) - new Date(aDate);
+    });
+
   // The route's road geometry — [lng, lat] pairs traced from OSM and stored
   // in routes.path_geojson. The at-a-glance map only renders when it exists.
   const hasRouteLine =
@@ -456,6 +477,67 @@ export default async function RoutePage({ params }) {
                   </div>
                 )}
               </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Stories featuring this drive — the reverse of the POI page's
+          "Stories featuring this place", fed by the story_routes junction.
+          Surfaces the long-form pieces that walk this route so the cross-link
+          works both ways. Only renders when a published story links here. */}
+      {stories.length > 0 && (
+        <section style={styles.storiesSection}>
+          <h2 style={styles.storiesHeading}>
+            {stories.length === 1
+              ? 'A Story Along This Route'
+              : 'Stories Along This Route'}
+          </h2>
+          <p style={styles.storiesSub}>
+            Go deeper into the history and character of this drive.
+          </p>
+          <div style={styles.storiesGrid}>
+            {stories.map((story) => (
+              <Link
+                key={story.id}
+                href={`/story/${story.slug}`}
+                style={styles.storyCard}
+              >
+                {story.hero_image_url ? (
+                  <div
+                    style={{
+                      ...styles.storyThumb,
+                      background: `#f0ebe4 url(${heroSrc(
+                        story.hero_image_url,
+                        320
+                      )}) center/cover no-repeat`,
+                    }}
+                    role="img"
+                    aria-label={story.hero_image_alt || story.title}
+                  />
+                ) : (
+                  <div style={styles.storyThumbFallback}>
+                    <span style={styles.storyThumbFallbackText}>
+                      {story.story_type || 'Story'}
+                    </span>
+                  </div>
+                )}
+                <div style={styles.storyCardBody}>
+                  {story.story_type && (
+                    <div style={styles.storyType}>{story.story_type}</div>
+                  )}
+                  <div style={styles.storyTitle}>
+                    {(story.title || '').trim()}
+                  </div>
+                  <div style={styles.storyMeta}>
+                    {story.author_name && <span>{story.author_name}</span>}
+                    {story.author_name && story.reading_time_minutes ? ' · ' : ''}
+                    {story.reading_time_minutes && (
+                      <span>{story.reading_time_minutes} min read</span>
+                    )}
+                  </div>
+                </div>
+              </Link>
             ))}
           </div>
         </section>
@@ -804,6 +886,90 @@ const styles = {
     fontSize: '0.78rem',
     color: COLORS.warmGray,
     letterSpacing: '0.02em',
+  },
+
+  storiesSection: { marginBottom: '4rem' },
+  storiesHeading: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: 'clamp(1.5rem, 4vw, 2.1rem)',
+    fontWeight: 600,
+    marginBottom: '0.5rem',
+    color: COLORS.ink,
+  },
+  storiesSub: {
+    fontSize: '1rem',
+    color: COLORS.warmGray,
+    marginBottom: '1.75rem',
+    lineHeight: 1.5,
+    maxWidth: '40rem',
+  },
+  storiesGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))',
+    gap: '1rem',
+  },
+  storyCard: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    background: '#fff',
+    border: '1px solid #ececec',
+    borderRadius: '12px',
+    overflow: 'hidden',
+    textDecoration: 'none',
+    color: 'inherit',
+    minHeight: '120px',
+  },
+  storyThumb: {
+    width: '120px',
+    flexShrink: 0,
+  },
+  storyThumbFallback: {
+    width: '120px',
+    flexShrink: 0,
+    background: `linear-gradient(135deg, ${COLORS.coral} 0%, #ff8a7a 100%)`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '10px',
+  },
+  storyThumbFallbackText: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: '0.7rem',
+    fontWeight: 700,
+    color: '#fff',
+    textTransform: 'uppercase',
+    letterSpacing: '0.1em',
+    textAlign: 'center',
+    lineHeight: 1.3,
+  },
+  storyCardBody: {
+    padding: '0.9rem 1.1rem',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    gap: '0.25rem',
+    minWidth: 0,
+    flex: 1,
+  },
+  storyType: {
+    fontSize: '0.66rem',
+    fontWeight: 700,
+    color: COLORS.coral,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+  },
+  storyTitle: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: '1.05rem',
+    fontWeight: 600,
+    color: COLORS.ink,
+    lineHeight: 1.25,
+  },
+  storyMeta: {
+    fontSize: '0.78rem',
+    color: COLORS.warmGray,
+    marginTop: '0.15rem',
   },
 
   closing: {
