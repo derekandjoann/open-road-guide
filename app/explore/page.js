@@ -38,6 +38,10 @@ export default function ExplorePage() {
   // change listener keeps it correct through rotation; initial false avoids
   // SSR/window access issues since this only renders meaningfully client-side.
   const [isMobile, setIsMobile] = useState(false);
+  // Measured height of the sticky search+chips controls pane on mobile. Feeds
+  // the map's sticky `top` and the cards' scroll-margin so the map pins right
+  // below the controls and a tapped card clears the whole stack. 0 on desktop.
+  const [controlsH, setControlsH] = useState(0);
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
     const update = () => setIsMobile(mq.matches);
@@ -46,6 +50,24 @@ export default function ExplorePage() {
     return () => mq.removeEventListener('change', update);
   }, []);
   const listRef = useRef(null);
+  const controlsRef = useRef(null);
+  // Track the controls pane's real rendered height. A ResizeObserver catches
+  // everything that can change it — rotation, the search field wrapping, late
+  // font load, the category chips arriving after fetch — and keeps the map's
+  // offset exact without hardcoding a height. Off (and zeroed) on desktop.
+  useEffect(() => {
+    if (!isMobile) {
+      setControlsH(0);
+      return;
+    }
+    const el = controlsRef.current;
+    if (!el) return;
+    const measure = () => setControlsH(el.offsetHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isMobile]);
 
   // Fetch POIs
   useEffect(() => {
@@ -153,6 +175,20 @@ export default function ExplorePage() {
       background: '#f8f7f4',
       fontFamily: "'Outfit', sans-serif",
     }}>
+      {/* Search + category controls. On mobile this whole block is sticky,
+          pinned under the global nav (top:94px) so the search field and the
+          filter chips stay on screen while the card list scrolls beneath the
+          map. Wrapping the two existing blocks keeps desktop byte-identical —
+          a plain static block div — while its measured height (controlsH)
+          drives the map's sticky top and the cards' scroll-margin below. */}
+      <div
+        ref={controlsRef}
+        style={{
+          position: isMobile ? 'sticky' : 'static',
+          top: isMobile ? '94px' : 'auto',
+          zIndex: isMobile ? 40 : 'auto',
+        }}
+      >
       {/* Header */}
       <header style={{
         background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
@@ -241,6 +277,8 @@ export default function ExplorePage() {
           );
         })}
       </div>
+      </div>
+      {/* end sticky controls wrapper */}
 
       {/* Map + Sidebar — side-by-side on desktop, stacked on mobile */}
       <div style={{
@@ -248,14 +286,16 @@ export default function ExplorePage() {
         flexDirection: isMobile ? 'column' : 'row',
         height: isMobile ? 'auto' : 'calc(100vh - 130px)',
       }}>
-        {/* Map — on mobile this is a sticky pane pinned just below the global
-            nav (sticky, 94px tall, z-index 100), so the card list scrolls
-            beneath a map that stays in view. z-index 20 sits above the cards
-            but below the nav. On desktop it's a normal flex pane. */}
+        {/* Map — on mobile this is a sticky pane pinned just below the sticky
+            controls block (which itself sits under the 94px global nav), so
+            the card list scrolls beneath a map that stays in view. Its top is
+            94px + the controls' measured height; z-index 20 sits above the
+            cards but below the controls (40) and nav (100). On desktop it's a
+            normal flex pane. */}
         <div style={{
           flex: isMobile ? 'none' : 1,
           position: isMobile ? 'sticky' : 'relative',
-          top: isMobile ? '94px' : 'auto',
+          top: isMobile ? `${94 + controlsH}px` : 'auto',
           zIndex: isMobile ? 20 : 'auto',
           height: isMobile ? '45vh' : 'auto',
           minHeight: isMobile ? '300px' : 0,
@@ -337,6 +377,7 @@ export default function ExplorePage() {
                 poi={poi}
                 isSelected={selectedPoi?.id === poi.id}
                 isMobile={isMobile}
+                controlsH={controlsH}
                 onClick={() => setSelectedPoi(poi)}
               />
             ))
@@ -386,7 +427,7 @@ function FilterChip({ label, count, active, color, onClick }) {
 }
 
 /* Sidebar POI Card */
-function PoiCard({ poi, isSelected, isMobile, onClick }) {
+function PoiCard({ poi, isSelected, isMobile, controlsH = 0, onClick }) {
   const color = getCategoryColor(poi.category);
   const label = poi.category
     ? poi.category.charAt(0).toUpperCase() + poi.category.slice(1)
@@ -403,9 +444,11 @@ function PoiCard({ poi, isSelected, isMobile, onClick }) {
         background: isSelected ? '#faf9f7' : '#fff',
         borderLeft: isSelected ? `3px solid ${color}` : '3px solid transparent',
         transition: 'all 0.15s ease',
-        // Clears the sticky map (94px nav + 45vh map) when scrollIntoView
-        // aligns this card to 'start' on mobile; harmless on desktop.
-        scrollMarginTop: isMobile ? 'calc(94px + 45vh + 10px)' : undefined,
+        // Clears the full pinned stack — nav (94px) + sticky search/chips
+        // controls (controlsH) + 45vh map — when scrollIntoView aligns this
+        // card to 'start' on mobile; harmless on desktop. controlsH arrives by
+        // prop so the margin tracks the controls' real measured height.
+        scrollMarginTop: isMobile ? `calc(${94 + controlsH}px + 45vh + 10px)` : undefined,
       }}
     >
       <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
