@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
+import CategoryMap from '../../components/CategoryMap';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -27,9 +28,11 @@ export default function RegionsIndexPage() {
   useEffect(() => {
     async function load() {
       setLoading(true);
+      // Pull each region's linked POI coordinates so the map can build a
+      // footprint. The array length doubles as the place count on each card.
       const { data } = await supabase
         .from('regions')
-        .select('*, region_pois(count)')
+        .select('*, region_pois(pois(longitude, latitude))')
         .eq('published', true)
         .order('name', { ascending: true });
 
@@ -72,6 +75,24 @@ export default function RegionsIndexPage() {
     canonical.setAttribute('href', 'https://openroadguide.com/regions');
   }, []);
 
+  // Map data: each region's POI coordinates become a colored footprint.
+  // Needs at least three geocoded points to form an area.
+  const regionMapData = regions
+    .map((region) => ({
+      slug: region.slug,
+      name: region.name,
+      points: (region.region_pois || [])
+        .map((rp) => rp.pois)
+        .filter(
+          (p) =>
+            p &&
+            typeof p.longitude === 'number' &&
+            typeof p.latitude === 'number'
+        )
+        .map((p) => [p.longitude, p.latitude]),
+    }))
+    .filter((r) => r.points.length >= 3);
+
   return (
     <main style={styles.main}>
       {/* Breadcrumb */}
@@ -93,6 +114,16 @@ export default function RegionsIndexPage() {
         </p>
       </header>
 
+      {/* Explorable map of every region */}
+      {!loading && regionMapData.length > 0 && (
+        <section style={styles.mapSection}>
+          <CategoryMap mode="regions" regions={regionMapData} />
+          <p style={styles.mapCaption}>
+            Each colored area marks where a region sits — tap one to explore it.
+          </p>
+        </section>
+      )}
+
       {/* Region cards */}
       {loading ? (
         <div style={styles.loading}>Loading regions…</div>
@@ -112,10 +143,9 @@ export default function RegionsIndexPage() {
 // ---- Sub-components ----
 
 function RegionCard({ region }) {
-  const placeCount =
-    Array.isArray(region.region_pois) && region.region_pois[0]
-      ? region.region_pois[0].count
-      : 0;
+  const placeCount = Array.isArray(region.region_pois)
+    ? region.region_pois.length
+    : 0;
 
   return (
     <Link href={`/region/${region.slug}`} style={styles.card}>
@@ -195,6 +225,18 @@ const styles = {
     lineHeight: 1.55,
     color: '#3a3a4e',
     margin: 0,
+    fontStyle: 'italic',
+    fontFamily: "'Fraunces', Georgia, serif",
+  },
+
+  // Map
+  mapSection: {
+    marginBottom: '3rem',
+  },
+  mapCaption: {
+    fontSize: '0.85rem',
+    color: COLORS.warmGray,
+    margin: '0.75rem 0 0 0',
     fontStyle: 'italic',
     fontFamily: "'Fraunces', Georgia, serif",
   },
