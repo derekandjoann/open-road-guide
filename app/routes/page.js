@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
+import CategoryMap from '../../components/CategoryMap';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -76,6 +77,11 @@ export default function RoutesIndexPage() {
     canonical.setAttribute('href', 'https://openroadguide.com/routes');
   }, []);
 
+  // Map data: every published route that has a traced path_geojson line.
+  const routeMapData = routes
+    .filter((r) => Array.isArray(r.path_geojson) && r.path_geojson.length > 1)
+    .map((r) => ({ slug: r.slug, name: r.name, path: r.path_geojson }));
+
   return (
     <main style={styles.main}>
       {/* Breadcrumb */}
@@ -96,6 +102,16 @@ export default function RoutesIndexPage() {
           every story, every mile that makes the drive worth taking.
         </p>
       </header>
+
+      {/* Explorable map of every byway */}
+      {!loading && routeMapData.length > 0 && (
+        <section style={styles.mapSection}>
+          <CategoryMap mode="routes" routes={routeMapData} />
+          <p style={styles.mapCaption}>
+            Every byway on the map is a link — tap a line to open its guide.
+          </p>
+        </section>
+      )}
 
       {/* Route cards */}
       {loading ? (
@@ -243,6 +259,18 @@ const styles = {
     lineHeight: 1.55,
     color: '#3a3a4e',
     margin: 0,
+    fontStyle: 'italic',
+    fontFamily: "'Fraunces', Georgia, serif",
+  },
+
+  // Map
+  mapSection: {
+    marginBottom: '3rem',
+  },
+  mapCaption: {
+    fontSize: '0.85rem',
+    color: COLORS.warmGray,
+    margin: '0.75rem 0 0 0',
     fontStyle: 'italic',
     fontFamily: "'Fraunces', Georgia, serif",
   },
