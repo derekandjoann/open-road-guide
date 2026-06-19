@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
 import MapView from '../../components/MapView';
 import { getCategoryColor, getCategoryEmoji } from '../../lib/categoryColors';
@@ -18,6 +19,26 @@ function thumbSrc(url, width = 160) {
   );
   return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
 }
+
+// Desktop consolidated-header tab styles. On /explore the section nav lives in
+// the dark bar (Nav.js returns null there at desktop width), so these mirror the
+// dark global nav's tab treatment: light inactive, coral active with underline.
+const navTabInactive = {
+  color: 'rgba(255,255,255,0.72)',
+  textDecoration: 'none',
+  fontSize: '15px',
+  fontWeight: 500,
+  paddingBottom: '4px',
+  borderBottom: '2px solid transparent',
+};
+const navTabActive = {
+  color: '#ff6b5b',
+  textDecoration: 'none',
+  fontSize: '15px',
+  fontWeight: 600,
+  paddingBottom: '4px',
+  borderBottom: '2px solid #ff6b5b',
+};
 
 export default function ExplorePage() {
   const [pois, setPois] = useState([]);
@@ -182,9 +203,9 @@ export default function ExplorePage() {
       {/* Search + category controls. On mobile this whole block is sticky,
           pinned under the global nav (top:94px) so the search field and the
           filter chips stay on screen while the card list scrolls beneath the
-          map. Wrapping the two existing blocks keeps desktop byte-identical —
-          a plain static block div — while its measured height (controlsH)
-          drives the map's sticky top and the cards' scroll-margin below. */}
+          map. Its measured height (controlsH) drives the map's sticky top and
+          the cards' scroll-margin below. On desktop the wrapper is static; the
+          consolidated header inside it pins itself (sticky top:0). */}
       <div
         ref={controlsRef}
         style={{
@@ -193,173 +214,214 @@ export default function ExplorePage() {
           zIndex: isMobile ? 40 : 'auto',
         }}
       >
-      {/* Header. Desktop is unchanged — branding link + fixed-width search.
-          Mobile drops the redundant branding (the global nav already carries
-          it), flushes the search across the row, and adds a hamburger that
-          toggles the category dropdown; the always-on chip strip below is then
-          hidden on phones to hand its height back to the map and list. */}
+      {/* Header. Mobile is unchanged — search + hamburger + the category
+          dropdown, the dark band the phone already ships. Desktop renders the
+          consolidated bar instead: on /explore the global nav steps aside
+          (Nav.js returns null at desktop width) and this single dark row carries
+          the wordmark, the section tabs, and the search. The old branding row
+          and the separate cream nav are both gone. */}
       <header style={{
         background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
-        padding: isMobile ? '12px 16px' : '20px 28px',
+        padding: isMobile ? '12px 16px' : '15px 28px',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: isMobile ? 'nowrap' : 'wrap',
-        gap: isMobile ? '10px' : '12px',
-        position: 'relative',
+        justifyContent: isMobile ? 'space-between' : 'flex-start',
+        flexWrap: 'nowrap',
+        gap: isMobile ? '10px' : '34px',
+        // Mobile: relative — anchors the dropdown; the sticky controls wrapper
+        // pins it under the cream nav. Desktop: this bar is the page's top
+        // chrome (no global nav on /explore), so it pins itself at the top.
+        position: isMobile ? 'relative' : 'sticky',
+        top: isMobile ? 'auto' : 0,
+        zIndex: isMobile ? 'auto' : 100,
       }}>
-        {!isMobile && (
-          <a href="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-            <span style={{
+        {isMobile ? (
+          <>
+            <div style={{
+              position: 'relative',
+              flex: 1,
+              minWidth: 0,
+              maxWidth: '100%',
+              // Keep the field above the dropdown's tap-away backdrop so it
+              // stays focusable while the menu is open.
+              zIndex: 3,
+            }}>
+              <input
+                type="text"
+                placeholder="Search places, stories, geology..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px 10px 36px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: 'rgba(255,255,255,0.1)',
+                  color: '#fff',
+                  fontSize: '14px',
+                  fontFamily: "'Outfit', sans-serif",
+                  outline: 'none',
+                }}
+              />
+              <span style={{
+                position: 'absolute',
+                left: '12px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                fontSize: '16px',
+                opacity: 0.5,
+              }}>🔍</span>
+            </div>
+
+            {/* Hamburger. Tints coral when a filter other than "All" is active,
+                so a hidden filter is never forgotten. */}
+            <button
+              type="button"
+              onClick={() => setFiltersOpen(o => !o)}
+              aria-label="Filter by category"
+              aria-expanded={filtersOpen}
+              style={{
+                position: 'relative',
+                zIndex: 3,
+                flexShrink: 0,
+                width: '42px',
+                height: '42px',
+                borderRadius: '10px',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '4px',
+                background: activeCategory !== 'All' ? '#ff6b5b' : 'rgba(255,255,255,0.1)',
+              }}
+            >
+              {[0, 1, 2].map(i => (
+                <span key={i} style={{
+                  width: '18px',
+                  height: '2px',
+                  borderRadius: '2px',
+                  background: '#fff',
+                  opacity: activeCategory !== 'All' ? 1 : 0.85,
+                }} />
+              ))}
+            </button>
+
+            {/* Category dropdown. A fixed backdrop closes it on an outside tap;
+                each chip filters and closes. It sits inside the sticky controls
+                wrapper (z-index 40), so it paints above the map (z-index 20).
+                Field and hamburger are at z-index 3 so they stay live above the
+                z-index-1 backdrop while the z-index-2 panel floats over the map. */}
+            {filtersOpen && (
+              <>
+                <div
+                  onClick={() => setFiltersOpen(false)}
+                  style={{
+                    position: 'fixed',
+                    inset: 0,
+                    background: 'rgba(0,0,0,0.04)',
+                    zIndex: 1,
+                  }}
+                />
+                <div style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)',
+                  left: '16px',
+                  right: '16px',
+                  background: '#fff',
+                  borderRadius: '14px',
+                  padding: '14px',
+                  boxShadow: '0 14px 36px rgba(0,0,0,0.28)',
+                  zIndex: 2,
+                }}>
+                  <div style={{
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    letterSpacing: '1px',
+                    textTransform: 'uppercase',
+                    color: '#999',
+                    marginBottom: '11px',
+                  }}>Filter by category</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    <FilterChip
+                      label="All"
+                      count={pois.length}
+                      active={activeCategory === 'All'}
+                      color="#1a1a2e"
+                      onClick={() => { setActiveCategory('All'); setFiltersOpen(false); }}
+                    />
+                    {categories.map(cat => {
+                      const color = getCategoryColor(cat);
+                      const label = cat.charAt(0).toUpperCase() + cat.slice(1);
+                      return (
+                        <FilterChip
+                          key={cat}
+                          label={label}
+                          count={pois.filter(p => p.category === cat).length}
+                          active={activeCategory === cat}
+                          color={color}
+                          onClick={() => { setActiveCategory(cat); setFiltersOpen(false); }}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Wordmark — links home, like the old nav. */}
+            <Link href="/" style={{
               fontFamily: "'Fraunces', serif",
-              fontSize: '22px',
+              fontSize: '21px',
               fontWeight: 800,
               color: '#ff6b5b',
-            }}>Open Road Guide</span>
-            <span style={{
-              fontFamily: "'Outfit', sans-serif",
-              fontSize: '13px',
-              fontWeight: 500,
-              color: 'rgba(255,255,255,0.5)',
-              letterSpacing: '1px',
-              textTransform: 'uppercase',
-            }}>Explore Utah</span>
-          </a>
-        )}
+              textDecoration: 'none',
+              letterSpacing: '-0.01em',
+              flex: '0 0 auto',
+            }}>Open Road Guide</Link>
 
-        <div style={{
-          position: 'relative',
-          flex: isMobile ? 1 : 'none',
-          width: isMobile ? 'auto' : '280px',
-          minWidth: 0,
-          maxWidth: '100%',
-          // Keep the field above the dropdown's tap-away backdrop on mobile so
-          // it stays focusable while the menu is open.
-          zIndex: isMobile ? 3 : 'auto',
-        }}>
-          <input
-            type="text"
-            placeholder="Search places, stories, geology..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '10px 14px 10px 36px',
-              borderRadius: '10px',
-              border: 'none',
-              background: 'rgba(255,255,255,0.1)',
-              color: '#fff',
-              fontSize: '14px',
-              fontFamily: "'Outfit', sans-serif",
-              outline: 'none',
-            }}
-          />
-          <span style={{
-            position: 'absolute',
-            left: '12px',
-            top: '50%',
-            transform: 'translateY(-50%)',
-            fontSize: '16px',
-            opacity: 0.5,
-          }}>🔍</span>
-        </div>
+            {/* Section tabs. Explore is the current page; the others link out and
+                match the dark nav the rest of the site now renders. */}
+            <nav style={{ display: 'flex', alignItems: 'center', gap: '28px', flex: '0 0 auto' }}>
+              <Link href="/explore" style={navTabActive}>Explore</Link>
+              <Link href="/routes" style={navTabInactive}>Routes</Link>
+              <Link href="/regions" style={navTabInactive}>Regions</Link>
+              <Link href="/stories" style={navTabInactive}>Stories</Link>
+            </nav>
 
-        {/* Mobile-only hamburger. Tints coral when a filter other than "All"
-            is active, so a hidden filter is never forgotten. */}
-        {isMobile && (
-          <button
-            type="button"
-            onClick={() => setFiltersOpen(o => !o)}
-            aria-label="Filter by category"
-            aria-expanded={filtersOpen}
-            style={{
-              position: 'relative',
-              zIndex: 3,
-              flexShrink: 0,
-              width: '42px',
-              height: '42px',
-              borderRadius: '10px',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '4px',
-              background: activeCategory !== 'All' ? '#ff6b5b' : 'rgba(255,255,255,0.1)',
-            }}
-          >
-            {[0, 1, 2].map(i => (
-              <span key={i} style={{
-                width: '18px',
-                height: '2px',
-                borderRadius: '2px',
-                background: '#fff',
-                opacity: activeCategory !== 'All' ? 1 : 0.85,
-              }} />
-            ))}
-          </button>
-        )}
+            {/* Spacer pushes the search to the right edge. */}
+            <div style={{ flex: 1 }} />
 
-        {/* Mobile category dropdown. A fixed backdrop closes it on an outside
-            tap; each chip filters and closes. It sits inside the sticky
-            controls wrapper (z-index 40), so it paints above the map (z-index
-            20) without any extra stacking work. The search field and hamburger
-            are lifted to z-index 3 so they stay live above the z-index-1
-            backdrop while the z-index-2 panel floats over the map. */}
-        {isMobile && filtersOpen && (
-          <>
-            <div
-              onClick={() => setFiltersOpen(false)}
-              style={{
-                position: 'fixed',
-                inset: 0,
-                background: 'rgba(0,0,0,0.04)',
-                zIndex: 1,
-              }}
-            />
-            <div style={{
-              position: 'absolute',
-              top: 'calc(100% + 8px)',
-              left: '16px',
-              right: '16px',
-              background: '#fff',
-              borderRadius: '14px',
-              padding: '14px',
-              boxShadow: '0 14px 36px rgba(0,0,0,0.28)',
-              zIndex: 2,
-            }}>
-              <div style={{
-                fontSize: '11px',
-                fontWeight: 700,
-                letterSpacing: '1px',
-                textTransform: 'uppercase',
-                color: '#999',
-                marginBottom: '11px',
-              }}>Filter by category</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                <FilterChip
-                  label="All"
-                  count={pois.length}
-                  active={activeCategory === 'All'}
-                  color="#1a1a2e"
-                  onClick={() => { setActiveCategory('All'); setFiltersOpen(false); }}
-                />
-                {categories.map(cat => {
-                  const color = getCategoryColor(cat);
-                  const label = cat.charAt(0).toUpperCase() + cat.slice(1);
-                  return (
-                    <FilterChip
-                      key={cat}
-                      label={label}
-                      count={pois.filter(p => p.category === cat).length}
-                      active={activeCategory === cat}
-                      color={color}
-                      onClick={() => { setActiveCategory(cat); setFiltersOpen(false); }}
-                    />
-                  );
-                })}
-              </div>
+            {/* Search — the same field as before, now in the single bar. */}
+            <div style={{ position: 'relative', width: '280px', maxWidth: '100%', flex: '0 0 auto' }}>
+              <input
+                type="text"
+                placeholder="Search places, stories, geology..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px 10px 36px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: 'rgba(255,255,255,0.1)',
+                  color: '#fff',
+                  fontSize: '14px',
+                  fontFamily: "'Outfit', sans-serif",
+                  outline: 'none',
+                }}
+              />
+              <span style={{
+                position: 'absolute',
+                left: '12px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                fontSize: '16px',
+                opacity: 0.5,
+              }}>🔍</span>
             </div>
           </>
         )}
@@ -407,7 +469,7 @@ export default function ExplorePage() {
       <div style={{
         display: 'flex',
         flexDirection: isMobile ? 'column' : 'row',
-        height: isMobile ? 'auto' : 'calc(100vh - 130px)',
+        height: isMobile ? 'auto' : 'calc(100vh - 124px)',
       }}>
         {/* Map — on mobile this is a sticky pane pinned just below the sticky
             controls block (which itself sits under the 94px global nav), so
