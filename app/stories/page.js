@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
+import CategoryMap from '../../components/CategoryMap';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -27,10 +28,11 @@ export default function StoriesIndexPage() {
   useEffect(() => {
     async function load() {
       setLoading(true);
-      // Newest first by published_at, falling back to created_at
+      // Newest first by published_at, falling back to created_at.
+      // Linked POI coordinates ride along so the map can place a pin.
       const { data } = await supabase
         .from('stories')
-        .select('*')
+        .select('*, story_pois(pois(longitude, latitude))')
         .eq('published', true)
         .order('published_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false });
@@ -78,6 +80,32 @@ export default function StoriesIndexPage() {
   const featured = stories.filter((s) => s.featured);
   const regular = stories.filter((s) => !s.featured);
 
+  // Map data: pin each story at the average position of its linked POIs.
+  const storyMapData = stories
+    .map((s) => {
+      const pts = (s.story_pois || [])
+        .map((sp) => sp.pois)
+        .filter(
+          (p) =>
+            p &&
+            typeof p.longitude === 'number' &&
+            typeof p.latitude === 'number'
+        )
+        .map((p) => [p.longitude, p.latitude]);
+      if (pts.length === 0) return null;
+      const lng = pts.reduce((a, p) => a + p[0], 0) / pts.length;
+      const lat = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+      return {
+        slug: s.slug,
+        title: s.title,
+        type: s.story_type,
+        hero: s.hero_image_url,
+        lng,
+        lat,
+      };
+    })
+    .filter(Boolean);
+
   return (
     <main style={styles.main}>
       {/* Breadcrumb */}
@@ -98,6 +126,16 @@ export default function StoriesIndexPage() {
           American West worth driving across.
         </p>
       </header>
+
+      {/* Explorable map of where each story takes place */}
+      {!loading && storyMapData.length > 0 && (
+        <section style={styles.mapSection}>
+          <CategoryMap mode="stories" stories={storyMapData} />
+          <p style={styles.mapCaption}>
+            Each pin marks where a story takes place — tap one to read it.
+          </p>
+        </section>
+      )}
 
       {/* Content */}
       {loading ? (
@@ -284,6 +322,18 @@ const styles = {
     lineHeight: 1.55,
     color: '#3a3a4e',
     margin: 0,
+    fontStyle: 'italic',
+    fontFamily: "'Fraunces', Georgia, serif",
+  },
+
+  // Map
+  mapSection: {
+    marginBottom: '3rem',
+  },
+  mapCaption: {
+    fontSize: '0.85rem',
+    color: COLORS.warmGray,
+    margin: '0.75rem 0 0 0',
     fontStyle: 'italic',
     fontFamily: "'Fraunces', Georgia, serif",
   },
