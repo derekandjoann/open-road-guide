@@ -42,6 +42,9 @@ export default function ExplorePage() {
   // the map's sticky `top` and the cards' scroll-margin so the map pins right
   // below the controls and a tapped card clears the whole stack. 0 on desktop.
   const [controlsH, setControlsH] = useState(0);
+  // Mobile category dropdown (the hamburger beside the search). Desktop keeps
+  // its always-on chip strip and never opens this.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
     const update = () => setIsMobile(mq.matches);
@@ -58,6 +61,7 @@ export default function ExplorePage() {
   useEffect(() => {
     if (!isMobile) {
       setControlsH(0);
+      setFiltersOpen(false);
       return;
     }
     const el = controlsRef.current;
@@ -189,34 +193,50 @@ export default function ExplorePage() {
           zIndex: isMobile ? 40 : 'auto',
         }}
       >
-      {/* Header */}
+      {/* Header. Desktop is unchanged — branding link + fixed-width search.
+          Mobile drops the redundant branding (the global nav already carries
+          it), flushes the search across the row, and adds a hamburger that
+          toggles the category dropdown; the always-on chip strip below is then
+          hidden on phones to hand its height back to the map and list. */}
       <header style={{
         background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
-        padding: '20px 28px',
+        padding: isMobile ? '12px 16px' : '20px 28px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: '12px',
+        flexWrap: isMobile ? 'nowrap' : 'wrap',
+        gap: isMobile ? '10px' : '12px',
+        position: 'relative',
       }}>
-        <a href="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-          <span style={{
-            fontFamily: "'Fraunces', serif",
-            fontSize: '22px',
-            fontWeight: 800,
-            color: '#ff6b5b',
-          }}>Open Road Guide</span>
-          <span style={{
-            fontFamily: "'Outfit', sans-serif",
-            fontSize: '13px',
-            fontWeight: 500,
-            color: 'rgba(255,255,255,0.5)',
-            letterSpacing: '1px',
-            textTransform: 'uppercase',
-          }}>Explore Utah</span>
-        </a>
+        {!isMobile && (
+          <a href="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            <span style={{
+              fontFamily: "'Fraunces', serif",
+              fontSize: '22px',
+              fontWeight: 800,
+              color: '#ff6b5b',
+            }}>Open Road Guide</span>
+            <span style={{
+              fontFamily: "'Outfit', sans-serif",
+              fontSize: '13px',
+              fontWeight: 500,
+              color: 'rgba(255,255,255,0.5)',
+              letterSpacing: '1px',
+              textTransform: 'uppercase',
+            }}>Explore Utah</span>
+          </a>
+        )}
 
-        <div style={{ position: 'relative', width: '280px', maxWidth: '100%' }}>
+        <div style={{
+          position: 'relative',
+          flex: isMobile ? 1 : 'none',
+          width: isMobile ? 'auto' : '280px',
+          minWidth: 0,
+          maxWidth: '100%',
+          // Keep the field above the dropdown's tap-away backdrop on mobile so
+          // it stays focusable while the menu is open.
+          zIndex: isMobile ? 3 : 'auto',
+        }}>
           <input
             type="text"
             placeholder="Search places, stories, geology..."
@@ -243,9 +263,111 @@ export default function ExplorePage() {
             opacity: 0.5,
           }}>🔍</span>
         </div>
+
+        {/* Mobile-only hamburger. Tints coral when a filter other than "All"
+            is active, so a hidden filter is never forgotten. */}
+        {isMobile && (
+          <button
+            type="button"
+            onClick={() => setFiltersOpen(o => !o)}
+            aria-label="Filter by category"
+            aria-expanded={filtersOpen}
+            style={{
+              position: 'relative',
+              zIndex: 3,
+              flexShrink: 0,
+              width: '42px',
+              height: '42px',
+              borderRadius: '10px',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '4px',
+              background: activeCategory !== 'All' ? '#ff6b5b' : 'rgba(255,255,255,0.1)',
+            }}
+          >
+            {[0, 1, 2].map(i => (
+              <span key={i} style={{
+                width: '18px',
+                height: '2px',
+                borderRadius: '2px',
+                background: '#fff',
+                opacity: activeCategory !== 'All' ? 1 : 0.85,
+              }} />
+            ))}
+          </button>
+        )}
+
+        {/* Mobile category dropdown. A fixed backdrop closes it on an outside
+            tap; each chip filters and closes. It sits inside the sticky
+            controls wrapper (z-index 40), so it paints above the map (z-index
+            20) without any extra stacking work. The search field and hamburger
+            are lifted to z-index 3 so they stay live above the z-index-1
+            backdrop while the z-index-2 panel floats over the map. */}
+        {isMobile && filtersOpen && (
+          <>
+            <div
+              onClick={() => setFiltersOpen(false)}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                background: 'rgba(0,0,0,0.04)',
+                zIndex: 1,
+              }}
+            />
+            <div style={{
+              position: 'absolute',
+              top: 'calc(100% + 8px)',
+              left: '16px',
+              right: '16px',
+              background: '#fff',
+              borderRadius: '14px',
+              padding: '14px',
+              boxShadow: '0 14px 36px rgba(0,0,0,0.28)',
+              zIndex: 2,
+            }}>
+              <div style={{
+                fontSize: '11px',
+                fontWeight: 700,
+                letterSpacing: '1px',
+                textTransform: 'uppercase',
+                color: '#999',
+                marginBottom: '11px',
+              }}>Filter by category</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                <FilterChip
+                  label="All"
+                  count={pois.length}
+                  active={activeCategory === 'All'}
+                  color="#1a1a2e"
+                  onClick={() => { setActiveCategory('All'); setFiltersOpen(false); }}
+                />
+                {categories.map(cat => {
+                  const color = getCategoryColor(cat);
+                  const label = cat.charAt(0).toUpperCase() + cat.slice(1);
+                  return (
+                    <FilterChip
+                      key={cat}
+                      label={label}
+                      count={pois.filter(p => p.category === cat).length}
+                      active={activeCategory === cat}
+                      color={color}
+                      onClick={() => { setActiveCategory(cat); setFiltersOpen(false); }}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
       </header>
 
-      {/* Category Filters */}
+      {/* Category Filters — desktop only. On mobile these live in the
+          hamburger dropdown above, so the strip is removed to reclaim height. */}
+      {!isMobile && (
       <div style={{
         padding: '12px 28px',
         background: '#fff',
@@ -277,6 +399,7 @@ export default function ExplorePage() {
           );
         })}
       </div>
+      )}
       </div>
       {/* end sticky controls wrapper */}
 
