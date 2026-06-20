@@ -21,6 +21,15 @@ const COLORS = {
   warmGray: '#666',
 };
 
+// Per-route colors — 12 brand-extended hues, assigned by the (name-sorted)
+// order routes load in, so each route's color is stable across loads and
+// identical on its map line and its card. Coral, teal, and violet are the
+// brand anchors; the rest walk the wheel between them.
+const ROUTE_COLORS = [
+  '#FF6B6B', '#F2884B', '#E3A019', '#8DA63C', '#3F9E6E', '#2FB3A8',
+  '#3E9CC0', '#3E6FB0', '#6A5BAE', '#9D4EDD', '#B5468A', '#C24E6A',
+];
+
 // Placeholder "coming soon" routes — edit names/taglines anytime,
 // or remove entries as they get added to the database.
 const COMING_SOON = [];
@@ -38,7 +47,14 @@ export default function RoutesIndexPage() {
         .eq('published', true)
         .order('name', { ascending: true });
 
-      setRoutes(data || []);
+      // Assign each route its color by name-sorted index, so the map line and
+      // the card always agree. Routes without geometry still get a card color.
+      const withColor = (data || []).map((r, i) => ({
+        ...r,
+        _color: ROUTE_COLORS[i % ROUTE_COLORS.length],
+      }));
+
+      setRoutes(withColor);
       setLoading(false);
     }
     load();
@@ -80,7 +96,7 @@ export default function RoutesIndexPage() {
   // Map data: every published route that has a traced path_geojson line.
   const routeMapData = routes
     .filter((r) => Array.isArray(r.path_geojson) && r.path_geojson.length > 1)
-    .map((r) => ({ slug: r.slug, name: r.name, path: r.path_geojson }));
+    .map((r) => ({ slug: r.slug, name: r.name, path: r.path_geojson, color: r._color }));
 
   return (
     <main style={styles.main}>
@@ -120,7 +136,7 @@ export default function RoutesIndexPage() {
         <section style={styles.cardsGrid}>
           {/* Real routes from Supabase */}
           {routes.map((route) => (
-            <RouteCard key={route.id} route={route} />
+            <RouteCard key={route.id} route={route} color={route._color} />
           ))}
 
           {/* Coming soon placeholders */}
@@ -135,15 +151,21 @@ export default function RoutesIndexPage() {
 
 // ---- Sub-components ----
 
-function RouteCard({ route }) {
+function RouteCard({ route, color }) {
+  const c = color || COLORS.coral;
   const seasonsText = Array.isArray(route.best_seasons)
     ? route.best_seasons.join(' · ')
     : route.best_seasons || '';
 
   return (
-    <Link href={`/route/${route.slug}`} style={styles.card}>
+    <Link
+      href={`/route/${route.slug}`}
+      style={{ ...styles.card, borderTop: `4px solid ${c}` }}
+    >
       {route.state && (
-        <div style={styles.cardEyebrow}>{route.state} · Scenic Byway</div>
+        <div style={{ ...styles.cardEyebrow, color: c }}>
+          {route.state} · Scenic Byway
+        </div>
       )}
       <h2 style={styles.cardTitle}>{route.name}</h2>
       {route.short_description && (
@@ -152,13 +174,13 @@ function RouteCard({ route }) {
 
       <div style={styles.cardStats}>
         {route.total_miles && (
-          <div style={styles.cardStat}>
+          <div style={{ ...styles.cardStat, borderLeft: `3px solid ${c}` }}>
             <div style={styles.cardStatLabel}>Distance</div>
             <div style={styles.cardStatValue}>{route.total_miles} mi</div>
           </div>
         )}
         {route.estimated_drive_hours && (
-          <div style={styles.cardStat}>
+          <div style={{ ...styles.cardStat, borderLeft: `3px solid ${c}` }}>
             <div style={styles.cardStatLabel}>Drive</div>
             <div style={styles.cardStatValue}>
               {route.estimated_drive_hours} hrs
@@ -166,20 +188,20 @@ function RouteCard({ route }) {
           </div>
         )}
         {seasonsText && (
-          <div style={styles.cardStat}>
+          <div style={{ ...styles.cardStat, borderLeft: `3px solid ${c}` }}>
             <div style={styles.cardStatLabel}>Best</div>
             <div style={styles.cardStatValue}>{seasonsText}</div>
           </div>
         )}
         {route.difficulty && (
-          <div style={styles.cardStat}>
+          <div style={{ ...styles.cardStat, borderLeft: `3px solid ${c}` }}>
             <div style={styles.cardStatLabel}>Difficulty</div>
             <div style={styles.cardStatValue}>{route.difficulty}</div>
           </div>
         )}
       </div>
 
-      <div style={styles.cardCta}>Plan this drive →</div>
+      <div style={{ ...styles.cardCta, color: c }}>Plan this drive →</div>
     </Link>
   );
 }
