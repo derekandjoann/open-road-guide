@@ -1,4 +1,5 @@
 import './globals.css';
+import Script from 'next/script';
 import Nav from './components/Nav';
 
 export const metadata = {
@@ -26,6 +27,20 @@ export default function RootLayout({ children }) {
       <body>
         <Nav />
         {children}
+
+        {/* Google Analytics (gtag.js) */}
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-T7BG5S3X62"
+          strategy="afterInteractive"
+        />
+        <Script id="google-analytics" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', 'G-T7BG5S3X62');
+          `}
+        </Script>
       </body>
     </html>
   );
