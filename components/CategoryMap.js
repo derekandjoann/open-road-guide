@@ -302,9 +302,30 @@ export default function CategoryMap({
           hovId = null;
           hideHover();
         });
+        // Touch devices have no hover, so the first tap on a line reveals its
+        // name and a second tap on the same line opens it. Pointer devices
+        // (hover) keep single-click, since hovering already shows the name.
+        const canHover =
+          typeof window !== 'undefined' &&
+          typeof window.matchMedia === 'function' &&
+          window.matchMedia('(hover: hover)').matches;
+        let armedSlug = null;
+        let armedId = null;
         map.on('click', 'cat-routes-hit', (e) => {
-          const slug = e.features[0].properties.slug;
-          if (slug) router.push(`/route/${slug}`);
+          const f = e.features[0];
+          const slug = f.properties.slug;
+          if (!slug) return;
+          if (canHover || armedSlug === slug) {
+            router.push(`/route/${slug}`);
+            return;
+          }
+          // First tap on touch: reveal the name and wait for a confirming tap.
+          if (armedId !== null && armedId !== f.id)
+            map.setFeatureState({ source: 'cat-routes', id: armedId }, { hover: false });
+          armedSlug = slug;
+          armedId = f.id;
+          map.setFeatureState({ source: 'cat-routes', id: f.id }, { hover: true });
+          showHover(e.lngLat, f.properties.name);
         });
       }
     }
@@ -401,9 +422,32 @@ export default function CategoryMap({
           hovId = null;
           hideHover();
         });
+        // Touch devices have no hover, so a single tap would jump straight into
+        // a region with no chance to read its name. There, the first tap reveals
+        // the name and highlights the piece; a second tap on the same piece
+        // opens it. Devices with a real pointer (hover) keep single-click to
+        // open, since hovering already shows the name.
+        const canHover =
+          typeof window !== 'undefined' &&
+          typeof window.matchMedia === 'function' &&
+          window.matchMedia('(hover: hover)').matches;
+        let armedSlug = null;
+        let armedId = null;
         map.on('click', 'cat-regions-fill', (e) => {
-          const slug = e.features[0].properties.slug;
-          if (slug) router.push(`/region/${slug}`);
+          const f = e.features[0];
+          const slug = f.properties.slug;
+          if (!slug) return;
+          if (canHover || armedSlug === slug) {
+            router.push(`/region/${slug}`);
+            return;
+          }
+          // First tap on touch: reveal the name and wait for a confirming tap.
+          if (armedId !== null && armedId !== f.id)
+            map.setFeatureState({ source: 'cat-regions', id: armedId }, { hover: false });
+          armedSlug = slug;
+          armedId = f.id;
+          map.setFeatureState({ source: 'cat-regions', id: f.id }, { hover: true });
+          showHover(e.lngLat, f.properties.name);
         });
       }
     }
@@ -415,6 +459,17 @@ export default function CategoryMap({
       // transform, which sidesteps the custom-marker positioning issue.
       markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
+
+      // Touch devices have no hover, so the first tap on a pin reveals its
+      // title and a second tap on the same pin opens the story. Pointer devices
+      // (hover) keep single-click, since hovering already shows the title.
+      const canHover =
+        typeof window !== 'undefined' &&
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(hover: hover)').matches;
+      let armedSlug = null;
+      let armedPopup = null;
+      let armedEl = null;
 
       stories.forEach((s) => {
         if (typeof s.lng !== 'number' || typeof s.lat !== 'number') return;
@@ -456,7 +511,18 @@ export default function CategoryMap({
         });
         el.addEventListener('click', (ev) => {
           ev.stopPropagation();
-          router.push(`/story/${s.slug}`);
+          if (canHover || armedSlug === s.slug) {
+            router.push(`/story/${s.slug}`);
+            return;
+          }
+          // First tap on touch: reveal the title, wait for a confirming tap.
+          if (armedPopup) armedPopup.remove();
+          if (armedEl) armedEl.style.transform = 'scale(1)';
+          armedSlug = s.slug;
+          armedPopup = popup;
+          armedEl = el;
+          el.style.transform = 'scale(1.15)';
+          popup.setLngLat([s.lng, s.lat]).addTo(map);
         });
 
         const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
