@@ -160,7 +160,9 @@ export default function CategoryMap({
         .map((r, i) => ({
           type: 'Feature',
           id: i,
-          properties: { slug: r.slug, name: r.name },
+          // color is assigned per route by the page (name-sorted order) so a
+          // route's line matches its card exactly; fall back to brand coral.
+          properties: { slug: r.slug, name: r.name, color: r.color || '#FF6B6B' },
           geometry: { type: 'LineString', coordinates: r.path },
         }));
       feats.forEach((f) =>
@@ -185,7 +187,7 @@ export default function CategoryMap({
           source: 'cat-routes',
           layout: { 'line-cap': 'round', 'line-join': 'round' },
           paint: {
-            'line-color': '#FF6B6B',
+            'line-color': ['get', 'color'],
             'line-width': [
               'case',
               ['boolean', ['feature-state', 'hover'], false],
