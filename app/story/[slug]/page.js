@@ -230,13 +230,20 @@ export default async function StoryPage({ params }) {
 
         {/* Hero image (if set) */}
         {story.hero_image_url && (
-          <div style={styles.heroImageWrap}>
-            <img
-              src={story.hero_image_url}
-              alt={story.hero_image_alt || story.title}
-              style={styles.heroImage}
-            />
-          </div>
+          <figure style={styles.heroFigure}>
+            <div style={styles.heroImageWrap}>
+              <img
+                src={story.hero_image_url}
+                alt={story.hero_image_alt || story.title}
+                style={styles.heroImage}
+              />
+            </div>
+            {story.hero_image_credit && (
+              <figcaption style={styles.heroCredit}>
+                {parseInlineLinks(story.hero_image_credit)}
+              </figcaption>
+            )}
+          </figure>
         )}
 
         {/* Title block */}
@@ -400,11 +407,21 @@ const styles = {
   crumbCurrent: { color: COLORS.ink, fontWeight: 500 },
 
   // Hero image
-  heroImageWrap: {
+  heroFigure: {
     margin: '0 0 2.5rem 0',
+  },
+  heroImageWrap: {
+    margin: 0,
     borderRadius: '14px',
     overflow: 'hidden',
     background: '#f4f4f4',
+  },
+  heroCredit: {
+    fontSize: '0.72rem',
+    color: COLORS.warmGray,
+    marginTop: '0.5rem',
+    textAlign: 'right',
+    letterSpacing: '0.01em',
   },
   heroImage: {
     display: 'block',
