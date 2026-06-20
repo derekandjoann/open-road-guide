@@ -479,8 +479,13 @@ export default function CategoryMap({
         el.style.boxSizing = 'border-box';
         el.style.cursor = 'pointer';
         el.style.borderRadius = '50%';
-        el.style.boxShadow = '0 2px 6px rgba(0,0,0,0.35)';
-        el.style.transition = 'transform 0.12s ease';
+        const baseShadow = '0 2px 6px rgba(0,0,0,0.35)';
+        // A glow ring (box-shadow) emphasizes the armed/hovered pin WITHOUT a
+        // CSS transform: MapLibre positions the marker with its own transform on
+        // this element, so scaling it here would clobber the pin's position.
+        const ringShadow = `0 0 0 3px #ffffff, 0 0 0 6px ${color}, 0 3px 8px rgba(0,0,0,0.4)`;
+        el.style.boxShadow = baseShadow;
+        el.style.transition = 'box-shadow 0.12s ease';
         if (s.hero) {
           el.style.width = '40px';
           el.style.height = '40px';
@@ -502,11 +507,11 @@ export default function CategoryMap({
         }).setText(s.title);
 
         el.addEventListener('mouseenter', () => {
-          el.style.transform = 'scale(1.15)';
+          el.style.boxShadow = ringShadow;
           popup.setLngLat([s.lng, s.lat]).addTo(map);
         });
         el.addEventListener('mouseleave', () => {
-          el.style.transform = 'scale(1)';
+          el.style.boxShadow = baseShadow;
           popup.remove();
         });
         el.addEventListener('click', (ev) => {
@@ -517,11 +522,11 @@ export default function CategoryMap({
           }
           // First tap on touch: reveal the title, wait for a confirming tap.
           if (armedPopup) armedPopup.remove();
-          if (armedEl) armedEl.style.transform = 'scale(1)';
+          if (armedEl) armedEl.style.boxShadow = baseShadow;
           armedSlug = s.slug;
           armedPopup = popup;
           armedEl = el;
-          el.style.transform = 'scale(1.15)';
+          el.style.boxShadow = ringShadow;
           popup.setLngLat([s.lng, s.lat]).addTo(map);
         });
 
