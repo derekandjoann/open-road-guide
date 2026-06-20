@@ -21,6 +21,13 @@ const COLORS = {
   warmGray: '#666',
 };
 
+// Per-region colors — 14 hues, assigned by the (name-sorted) order regions
+// load in, so each region's color is stable and matches its map piece exactly.
+const REGION_COLORS = [
+  '#C1432E', '#D9772B', '#C99A2E', '#7E8A2E', '#4F8F4A', '#2E9E83', '#3E9CC0',
+  '#3E6FB0', '#6A5BAE', '#8E4FA0', '#B5468A', '#C24E6A', '#7C6A55', '#5B8C7B',
+];
+
 export default function RegionsIndexPage() {
   const [regions, setRegions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -36,7 +43,14 @@ export default function RegionsIndexPage() {
         .eq('published', true)
         .order('name', { ascending: true });
 
-      setRegions(data || []);
+      // Assign each region its color by name-sorted index, so the map piece
+      // and the card always agree.
+      const withColor = (data || []).map((r, i) => ({
+        ...r,
+        _color: REGION_COLORS[i % REGION_COLORS.length],
+      }));
+
+      setRegions(withColor);
       setLoading(false);
     }
     load();
@@ -81,6 +95,7 @@ export default function RegionsIndexPage() {
     .map((region) => ({
       slug: region.slug,
       name: region.name,
+      color: region._color,
       points: (region.region_pois || [])
         .map((rp) => rp.pois)
         .filter(
@@ -132,7 +147,7 @@ export default function RegionsIndexPage() {
       ) : (
         <section style={styles.cardsGrid}>
           {regions.map((region) => (
-            <RegionCard key={region.id} region={region} />
+            <RegionCard key={region.id} region={region} color={region._color} />
           ))}
         </section>
       )}
@@ -142,26 +157,32 @@ export default function RegionsIndexPage() {
 
 // ---- Sub-components ----
 
-function RegionCard({ region }) {
+function RegionCard({ region, color }) {
+  const c = color || COLORS.violet;
   const placeCount = Array.isArray(region.region_pois)
     ? region.region_pois.length
     : 0;
 
   return (
-    <Link href={`/region/${region.slug}`} style={styles.card}>
+    <Link
+      href={`/region/${region.slug}`}
+      style={{ ...styles.card, borderTop: `4px solid ${c}` }}
+    >
       {region.state && (
-        <div style={styles.cardEyebrow}>{region.state} · Region</div>
+        <div style={{ ...styles.cardEyebrow, color: c }}>
+          {region.state} · Region
+        </div>
       )}
       <h2 style={styles.cardTitle}>{region.name}</h2>
       {region.short_description && (
         <p style={styles.cardTagline}>{region.short_description}</p>
       )}
       {placeCount > 0 && (
-        <div style={styles.cardCount}>
+        <div style={{ ...styles.cardCount, background: c, color: '#fff' }}>
           {placeCount} {placeCount === 1 ? 'place' : 'places'} to explore
         </div>
       )}
-      <div style={styles.cardCta}>Explore region →</div>
+      <div style={{ ...styles.cardCta, color: c }}>Explore region →</div>
     </Link>
   );
 }
