@@ -52,42 +52,120 @@ const BASEMAP_STYLE = {
   ],
 };
 
-// Convex hull (Andrew's monotone chain) on [lng,lat] points. Returns a closed
-// ring (first point repeated) ready to drop into a GeoJSON Polygon. Fewer than
-// three distinct points can't form an area, so callers skip those.
-function hull(points) {
-  const uniq = Array.from(
-    new Map(points.map((p) => [p[0] + ',' + p[1], p])).values()
+// ---------------------------------------------------------------------------
+// Region "puzzle" geometry. Each region becomes one piece of a tessellation
+// that fills the whole state: every point in Utah is assigned to the region
+// whose POI centroid is nearest (a Voronoi partition), then clipped to the
+// state outline — no gaps, no overlaps. The math runs in an aspect-corrected
+// projection (lng * K, lat) so "nearest" matches real ground distance at
+// Utah's latitude, then un-projects back to lng/lat for the map.
+// ---------------------------------------------------------------------------
+const PUZZLE_K = Math.cos((39.5 * Math.PI) / 180);
+
+// Utah's outline for a faint state border (lng/lat): a big rectangle minus the
+// northeast (Wyoming) corner.
+const UTAH_OUTLINE = [
+  [-114.052, 36.998], [-114.052, 42.002], [-111.047, 42.002],
+  [-111.047, 41.001], [-109.041, 41.001], [-109.041, 36.998],
+  [-114.052, 36.998],
+];
+
+// That same outline as two convex rectangles (their union is Utah), in
+// projected x (= lng * PUZZLE_K) and raw lat — used to clip every cell.
+const UTAH_RECTS = [
+  { xmin: -114.052 * PUZZLE_K, xmax: -111.047 * PUZZLE_K, ymin: 36.998, ymax: 42.002 },
+  { xmin: -111.047 * PUZZLE_K, xmax: -109.041 * PUZZLE_K, ymin: 36.998, ymax: 41.001 },
+];
+
+// A starting polygon comfortably larger than the state (projected coords).
+const PUZZLE_BOUNDS = [
+  [-118 * PUZZLE_K, 35], [-106 * PUZZLE_K, 35],
+  [-106 * PUZZLE_K, 44], [-118 * PUZZLE_K, 44],
+];
+
+// Sutherland–Hodgman: keep the part of `poly` where nx*x + ny*y <= c.
+function clipHalf(poly, nx, ny, c) {
+  const out = [];
+  const n = poly.length;
+  if (!n) return out;
+  const side = (p) => nx * p[0] + ny * p[1] - c;
+  const cut = (a, b, da, db) => {
+    const t = da / (da - db);
+    return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+  };
+  for (let i = 0; i < n; i++) {
+    const cur = poly[i];
+    const prev = poly[(i + n - 1) % n];
+    const dc = side(cur);
+    const dp = side(prev);
+    const ci = dc <= 1e-12;
+    const pi = dp <= 1e-12;
+    if (ci) {
+      if (!pi) out.push(cut(prev, cur, dp, dc));
+      out.push(cur);
+    } else if (pi) {
+      out.push(cut(prev, cur, dp, dc));
+    }
+  }
+  return out;
+}
+
+// Clip a ring to an axis-aligned rectangle (projected coords).
+function clipRect(poly, R) {
+  let o = poly;
+  o = clipHalf(o, -1, 0, -R.xmin);
+  o = clipHalf(o, 1, 0, R.xmax);
+  o = clipHalf(o, 0, -1, -R.ymin);
+  o = clipHalf(o, 0, 1, R.ymax);
+  return o;
+}
+
+// Voronoi cell of seed i = the bounds clipped by the perpendicular bisector
+// against every other seed (all seeds in projected coords).
+function voronoiCell(i, seeds) {
+  let cell = PUZZLE_BOUNDS.slice();
+  const s = seeds[i];
+  for (let j = 0; j < seeds.length; j++) {
+    if (j === i) continue;
+    const t = seeds[j];
+    const nx = t[0] - s[0];
+    const ny = t[1] - s[1];
+    if (nx === 0 && ny === 0) continue;
+    const c = (t[0] * t[0] + t[1] * t[1] - (s[0] * s[0] + s[1] * s[1])) / 2;
+    cell = clipHalf(cell, nx, ny, c);
+    if (cell.length < 3) break;
+  }
+  return cell;
+}
+
+// Build each region's puzzle piece as lng/lat MultiPolygon coordinates. A
+// region whose cell straddles the state's notched corner yields two rings.
+function regionPieces(regions) {
+  const seeded = regions.filter(
+    (r) => Array.isArray(r.points) && r.points.length
   );
-  if (uniq.length < 3) return null;
-  const pts = [...uniq].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  const cross = (o, a, b) =>
-    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-  const lower = [];
-  for (const p of pts) {
-    while (
-      lower.length >= 2 &&
-      cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0
-    )
-      lower.pop();
-    lower.push(p);
-  }
-  const upper = [];
-  for (let i = pts.length - 1; i >= 0; i--) {
-    const p = pts[i];
-    while (
-      upper.length >= 2 &&
-      cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0
-    )
-      upper.pop();
-    upper.push(p);
-  }
-  lower.pop();
-  upper.pop();
-  const ring = lower.concat(upper);
-  if (ring.length < 3) return null;
-  ring.push(ring[0]);
-  return ring;
+  const seeds = seeded.map((r) => {
+    let x = 0;
+    let y = 0;
+    r.points.forEach((p) => {
+      x += p[0] * PUZZLE_K;
+      y += p[1];
+    });
+    return [x / r.points.length, y / r.points.length];
+  });
+  return seeded.map((r, i) => {
+    const cell = voronoiCell(i, seeds);
+    const polys = [];
+    UTAH_RECTS.forEach((R) => {
+      const clipped = clipRect(cell, R);
+      if (clipped.length >= 3) {
+        const ring = clipped.map((p) => [p[0] / PUZZLE_K, p[1]]);
+        ring.push(ring[0]); // close the ring
+        polys.push([ring]);
+      }
+    });
+    return { slug: r.slug, name: r.name, color: r.color, polys };
+  });
 }
 
 export default function CategoryMap({
@@ -234,21 +312,24 @@ export default function CategoryMap({
     // ---------- REGIONS ----------
     if (mode === 'regions') {
       const feats = [];
-      regions.forEach((r, i) => {
-        const ring = hull(r.points || []);
-        if (!ring) return;
-        ring.forEach((c) => extend(c[0], c[1]));
-        feats.push({
-          type: 'Feature',
-          id: i,
-          properties: {
-            slug: r.slug,
-            name: r.name,
-            color: REGION_COLORS[i % REGION_COLORS.length],
-          },
-          geometry: { type: 'Polygon', coordinates: [ring] },
+      const pieces = regionPieces(regions);
+      pieces
+        .filter((p) => p.polys.length)
+        .forEach((p, i) => {
+          p.polys.forEach((poly) =>
+            poly[0].forEach((c) => extend(c[0], c[1]))
+          );
+          feats.push({
+            type: 'Feature',
+            id: i,
+            properties: {
+              slug: p.slug,
+              name: p.name,
+              color: p.color || REGION_COLORS[i % REGION_COLORS.length],
+            },
+            geometry: { type: 'MultiPolygon', coordinates: p.polys },
+          });
         });
-      });
       const data = { type: 'FeatureCollection', features: feats };
 
       if (map.getSource('cat-regions')) {
@@ -264,24 +345,39 @@ export default function CategoryMap({
             'fill-opacity': [
               'case',
               ['boolean', ['feature-state', 'hover'], false],
-              0.5,
-              0.22,
+              0.74,
+              0.52,
             ],
           },
         });
+        // White seams between the pieces give the jigsaw-puzzle look.
         map.addLayer({
           id: 'cat-regions-line',
           type: 'line',
           source: 'cat-regions',
           layout: { 'line-join': 'round' },
           paint: {
-            'line-color': ['get', 'color'],
-            'line-width': [
-              'case',
-              ['boolean', ['feature-state', 'hover'], false],
-              3.5,
-              2,
-            ],
+            'line-color': '#ffffff',
+            'line-width': 1.5,
+            'line-opacity': 0.9,
+          },
+        });
+        // A faint dark outline of Utah anchors the puzzle to the whole state.
+        map.addSource('cat-utah', {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: UTAH_OUTLINE },
+          },
+        });
+        map.addLayer({
+          id: 'cat-utah-line',
+          type: 'line',
+          source: 'cat-utah',
+          paint: {
+            'line-color': '#1a1a2e',
+            'line-opacity': 0.45,
+            'line-width': 1.3,
           },
         });
       }
