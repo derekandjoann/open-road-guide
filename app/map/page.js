@@ -37,26 +37,6 @@ function convexHull(points) {
   return ring;
 }
 
-// story_pois has no order column — chain the points by nearest-neighbour from the
-// westernmost, so the arc reads as a path rather than a tangle.
-function nearestNeighbourOrder(points) {
-  const pts = points.filter(Boolean).map((p) => [p[0], p[1]]);
-  if (pts.length <= 2) return pts;
-  const remaining = pts.slice();
-  remaining.sort((a, b) => a[0] - b[0]);
-  const ordered = [remaining.shift()];
-  while (remaining.length) {
-    const last = ordered[ordered.length - 1];
-    let bi = 0, bd = Infinity;
-    remaining.forEach((p, i) => {
-      const d = (p[0] - last[0]) ** 2 + (p[1] - last[1]) ** 2;
-      if (d < bd) { bd = d; bi = i; }
-    });
-    ordered.push(remaining.splice(bi, 1)[0]);
-  }
-  return ordered;
-}
-
 const fc = (features) => ({ type: 'FeatureCollection', features });
 
 export default function MapPage() {
@@ -113,7 +93,7 @@ export default function MapPage() {
           supabase.from('regions').select('id,slug,name,short_description').eq('published', true),
           supabase.from('region_pois').select('region_id,poi_id'),
           supabase.from('stories').select('id,slug,title,story_type,excerpt').eq('published', true),
-          supabase.from('story_pois').select('story_id,poi_id'),
+          supabase.from('story_pois').select('story_id,poi_id,sort_order'),
         ]);
         if (cancelled) return;
         if (poiR.error) throw poiR.error;
@@ -164,20 +144,25 @@ export default function MapPage() {
           const p = poiById.get(sp.poi_id);
           if (!p || p.longitude == null || p.latitude == null) return;
           if (!storyMembers.has(sp.story_id)) storyMembers.set(sp.story_id, []);
-          storyMembers.get(sp.story_id).push(p);
+          storyMembers.get(sp.story_id).push({ p, ord: sp.sort_order });
         });
         const storyArcFeatures = [];
         const storyPointFeatures = [];
         const storyDetail = {}; // slug -> { connects: [names] }
         (storyR.data || []).forEach((st) => {
-          const members = storyMembers.get(st.id) || [];
+          // Order POIs by authored sort_order (narrative sequence); any without
+          // an order fall to the end, preserving a stable arc.
+          const members = (storyMembers.get(st.id) || [])
+            .slice()
+            .sort((a, b) => (a.ord == null ? Infinity : a.ord) - (b.ord == null ? Infinity : b.ord))
+            .map((x) => x.p);
           const color = storyColor(st.story_type);
           storyDetail[st.slug] = { connects: members.map((m) => m.name) };
           const coords = members.map((m) => [m.longitude, m.latitude]);
           if (coords.length > 1) {
             storyArcFeatures.push({
               type: 'Feature',
-              geometry: { type: 'LineString', coordinates: nearestNeighbourOrder(coords) },
+              geometry: { type: 'LineString', coordinates: coords },
               properties: { kind: 'story', slug: st.slug, title: st.title, stype: st.story_type || '', excerpt: st.excerpt || '', color },
             });
           }
