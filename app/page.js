@@ -168,9 +168,9 @@ export default function HomePage() {
               textDecoration: 'none',
               boxShadow: '0 4px 20px rgba(255,107,91,0.4)',
             }}>
-              🗺️ Explore the Map
+              Browse every stop
             </a>
-            <a href="#map-preview" style={{
+            <a href="/map?near=1" style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: '8px',
@@ -184,7 +184,7 @@ export default function HomePage() {
               borderRadius: '12px',
               textDecoration: 'none',
             }}>
-              ↓ See a Preview
+              What's near me?
             </a>
           </div>
 
