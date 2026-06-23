@@ -9,6 +9,24 @@ import { getCategoryColor, getCategoryEmoji } from '../../lib/categoryColors';
 
 // Regions carry no category; give each a stable color by cycling the brand palette.
 const REGION_PALETTE = ['#ff6b5b', '#12b5a0', '#ffb627', '#7c5cfc', '#f59e0b'];
+// Fixed per-region colors: a proper 4-coloring of the region adjacency graph
+// so no two regions that share a border get the same tint.
+const REGION_COLORS = {
+  'salt-lake-wasatch-front': '#7c5cfc',
+  'park-city-wasatch-back': '#12b5a0',
+  'utah-valley': '#ff6b5b',
+  'cache-valley-bear-lake': '#ff6b5b',
+  'central-utah': '#ffb627',
+  'castle-country-san-rafael-swell': '#7c5cfc',
+  'dinosaurland': '#ffb627',
+  'moab-canyon-country': '#12b5a0',
+  'capitol-reef-country': '#12b5a0',
+  'trail-of-the-ancients': '#7c5cfc',
+  'bryce-canyon-country': '#ff6b5b',
+  'kanab-grand-staircase': '#ffb627',
+  'greater-zion': '#7c5cfc',
+  'cedar-breaks-brian-head': '#12b5a0',
+};
 // Stories colored by their type.
 const STORY_TYPE_COLOR = { history: '#ffb627', culture: '#7c5cfc', geology: '#12b5a0', nature: '#ff6b5b' };
 function storyColor(t) { return STORY_TYPE_COLOR[(t || '').toLowerCase()] || '#7c5cfc'; }
@@ -143,7 +161,7 @@ export default function MapPage() {
           regionFeatures.push({
             type: 'Feature',
             geometry,
-            properties: { kind: 'region', slug: rg.slug, name: rg.name, desc: rg.short_description || '', color: REGION_PALETTE[i % REGION_PALETTE.length], count: (regionMembers.get(rg.id) || []).length },
+            properties: { kind: 'region', slug: rg.slug, name: rg.name, desc: rg.short_description || '', color: REGION_COLORS[rg.slug] || REGION_PALETTE[i % REGION_PALETTE.length], count: (regionMembers.get(rg.id) || []).length },
           });
         });
 
