@@ -252,12 +252,15 @@ export default function HomePage() {
           )}
 
           <div style={{ textAlign: 'center', marginTop: '24px' }}>
-            <a href="/explore" style={{
+            <a href="/map" style={{
               display: 'inline-flex', alignItems: 'center', gap: '8px',
               padding: '12px 28px', background: '#1a1a2e', color: '#fff',
               fontFamily: "'Outfit', sans-serif", fontWeight: 600, fontSize: '15px',
               borderRadius: '10px', textDecoration: 'none',
             }}>Open Full-Screen Map →</a>
+            <div style={{ marginTop: '12px', fontSize: '13px', color: '#999', fontFamily: "'Outfit', sans-serif" }}>
+              The full map layers in scenic routes, regions, and the stories that tie places together — and can now find places near you.
+            </div>
           </div>
         </div>
       </section>
