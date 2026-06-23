@@ -64,6 +64,7 @@ export default function MapPage() {
   const mapRef = useRef(null);
   const addedRef = useRef(false);
   const userMarkerRef = useRef(null);
+  const autoNearRef = useRef(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
@@ -336,6 +337,22 @@ export default function MapPage() {
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
   }
+
+  // Honor the homepage "What's near me?" door: /map?near=1 auto-runs the locate
+  // flow once the map is ready, so the button delivers on its promise instead of
+  // dropping the reader on a cold statewide view. Fires once; manual "Near me"
+  // is unchanged.
+  useEffect(() => {
+    if (!mapLoaded || autoNearRef.current) return;
+    let wantsNear = false;
+    try {
+      wantsNear = new URLSearchParams(window.location.search).get('near') === '1';
+    } catch (e) { /* no query string available */ }
+    if (wantsNear) {
+      autoNearRef.current = true;
+      locateMe();
+    }
+  }, [mapLoaded]);
 
   function toggle(layer) {
     const next = { ...state, [layer]: !state[layer] };
