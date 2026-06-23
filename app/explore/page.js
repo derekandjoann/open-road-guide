@@ -386,6 +386,7 @@ export default function ExplorePage() {
             {/* Section tabs. Explore is the current page; the others link out and
                 match the dark nav the rest of the site now renders. */}
             <nav style={{ display: 'flex', alignItems: 'center', gap: '28px', flex: '0 0 auto' }}>
+              <Link href="/map" style={navTabInactive}>Map</Link>
               <Link href="/explore" style={navTabActive}>Explore</Link>
               <Link href="/routes" style={navTabInactive}>Routes</Link>
               <Link href="/regions" style={navTabInactive}>Regions</Link>
