@@ -2,9 +2,11 @@
 
 import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
 import MapView from '../../components/MapView';
 import { getCategoryColor, getCategoryEmoji } from '../../lib/categoryColors';
+import { navLinks, isNavLinkActive } from '../../lib/navLinks';
 import { toSlug } from '../../lib/slug'; 
 
 // Serve a small, right-sized thumbnail from Supabase's image render endpoint
@@ -41,6 +43,7 @@ const navTabActive = {
 };
 
 export default function ExplorePage() {
+  const pathname = usePathname();
   const [pois, setPois] = useState([]);
   const [filteredPois, setFilteredPois] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -386,11 +389,15 @@ export default function ExplorePage() {
             {/* Section tabs. Explore is the current page; the others link out and
                 match the dark nav the rest of the site now renders. */}
             <nav style={{ display: 'flex', alignItems: 'center', gap: '28px', flex: '0 0 auto' }}>
-              <Link href="/map" style={navTabInactive}>Map</Link>
-              <Link href="/explore" style={navTabActive}>Explore</Link>
-              <Link href="/routes" style={navTabInactive}>Routes</Link>
-              <Link href="/regions" style={navTabInactive}>Regions</Link>
-              <Link href="/stories" style={navTabInactive}>Stories</Link>
+              {navLinks.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  style={isNavLinkActive(pathname, link.href) ? navTabActive : navTabInactive}
+                >
+                  {link.label}
+                </Link>
+              ))}
             </nav>
 
             {/* Spacer pushes the search to the right edge. */}
