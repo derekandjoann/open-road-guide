@@ -31,6 +31,8 @@ const REGION_COLORS = {
 const STORY_TYPE_COLOR = { history: '#ffb627', culture: '#7c5cfc', geology: '#12b5a0', nature: '#ff6b5b' };
 function storyColor(t) { return STORY_TYPE_COLOR[(t || '').toLowerCase()] || '#7c5cfc'; }
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
+// Distance label: one decimal when close, whole miles when far.
+function fmtMiles(d) { if (d == null || isNaN(d)) return '—'; return d < 10 ? Number(d).toFixed(1) : String(Math.round(d)); }
 
 // Monotone-chain convex hull over [lng,lat] points → closed ring, or null if < 3.
 function convexHull(points) {
@@ -61,11 +63,14 @@ export default function MapPage() {
   const mapContainer = useRef(null);
   const mapRef = useRef(null);
   const addedRef = useRef(false);
+  const userMarkerRef = useRef(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const [state, setState] = useState({ pois: true, routes: true, regions: false, stories: false });
   const [sheet, setSheet] = useState(null); // { kind, ...props }
+  const [locating, setLocating] = useState(false);
+  const [geoErr, setGeoErr] = useState('');
 
   // Init map once.
   useEffect(() => {
@@ -96,7 +101,7 @@ export default function MapPage() {
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     map.on('load', () => setMapLoaded(true));
     mapRef.current = map;
-    return () => { map.remove(); mapRef.current = null; addedRef.current = false; };
+    return () => { map.remove(); mapRef.current = null; addedRef.current = false; userMarkerRef.current = null; };
   }, []);
 
   // Load all four overlays from live data. Each overlay is assembled defensively:
@@ -246,6 +251,11 @@ export default function MapPage() {
       map.addSource('story-points', { type: 'geojson', data: data.storyPtFC });
       map.addLayer({ id: 'story-rings', type: 'circle', source: 'story-points', layout: { visibility: vis(state.stories) }, paint: { 'circle-radius': 11, 'circle-color': ['get', 'color'], 'circle-opacity': 0.14, 'circle-stroke-color': ['get', 'color'], 'circle-stroke-width': 2 } });
     });
+    // Near-me highlight rings (below the pins; populated on "Near me").
+    tryAdd(() => {
+      map.addSource('nearme', { type: 'geojson', data: fc([]) });
+      map.addLayer({ id: 'nearme-rings', type: 'circle', source: 'nearme', paint: { 'circle-radius': 13, 'circle-color': '#2563eb', 'circle-opacity': 0.12, 'circle-stroke-color': '#2563eb', 'circle-stroke-width': 2, 'circle-stroke-opacity': 0.85 } });
+    });
     // POIs (top)
     tryAdd(() => {
       map.addSource('pois', { type: 'geojson', data: data.poiFC });
@@ -277,6 +287,56 @@ export default function MapPage() {
     });
   }, [mapLoaded, data, state]);
 
+  function placeUserMarker(lng, lat) {
+    const map = mapRef.current;
+    if (!map) return;
+    if (userMarkerRef.current) { userMarkerRef.current.setLngLat([lng, lat]); return; }
+    const el = document.createElement('div');
+    el.style.cssText = 'width:18px;height:18px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 4px rgba(37,99,235,.25),0 1px 4px rgba(0,0,0,.4)';
+    userMarkerRef.current = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
+  }
+
+  function locateMe() {
+    const map = mapRef.current;
+    if (!map) return;
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGeoErr('Location isn’t available on this device.');
+      return;
+    }
+    setGeoErr('');
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        placeUserMarker(lng, lat);
+        try { map.flyTo({ center: [lng, lat], zoom: 9, duration: 900 }); } catch (e) { /* keep view */ }
+        try {
+          const { data: rows, error } = await supabase.rpc('nearme_pois', { user_lat: lat, user_lng: lng, max_results: 8 });
+          if (error) throw error;
+          const list = rows || [];
+          const src = map.getSource('nearme');
+          if (src) src.setData(fc(list
+            .filter((r) => r.longitude != null && r.latitude != null)
+            .map((r) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [r.longitude, r.latitude] }, properties: {} }))));
+          setSheet({ kind: 'nearme', list });
+        } catch (e) {
+          console.error('nearme rpc failed', e);
+          setGeoErr('Couldn’t load nearby places. Try again.');
+        } finally {
+          setLocating(false);
+        }
+      },
+      (e) => {
+        setLocating(false);
+        setGeoErr(e && e.code === 1
+          ? 'Location permission is blocked. Enable it to use Near me.'
+          : 'Couldn’t get your location. Try again.');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  }
+
   function toggle(layer) {
     const next = { ...state, [layer]: !state[layer] };
     setState(next);
@@ -307,6 +367,8 @@ export default function MapPage() {
     } else if (k === 'story') {
       const det = (data && data.storyDetail[sheet.slug]) || { connects: [] };
       sheetEl = doorwaySheet(close, sheet.color, `${sheet.stype} · Story`, sheet.title, '', sheet.excerpt, det.connects, 'Read the story →', `/story/${sheet.slug}`);
+    } else if (k === 'nearme') {
+      sheetEl = nearmeSheet(close, sheet.list || []);
     }
   }
 
@@ -343,9 +405,30 @@ export default function MapPage() {
       {err && (
         <div style={{ position: 'absolute', top: 110, left: 16, right: 16, background: 'rgba(255,107,91,.15)', color: '#ffd7d1', borderRadius: 10, padding: '8px 12px', fontSize: 12.5 }}>{err}</div>
       )}
+      {geoErr && (
+        <div style={{ position: 'absolute', top: err ? 150 : 110, left: 16, right: 16, background: 'rgba(255,107,91,.15)', color: '#ffd7d1', borderRadius: 10, padding: '8px 12px', fontSize: 12.5, textAlign: 'center' }}>{geoErr}</div>
+      )}
+
+      {data && !sheet && (
+        <button
+          onClick={locateMe}
+          disabled={locating}
+          aria-label="Find places near me"
+          style={{ position: 'fixed', left: 14, bottom: 16, zIndex: 20, display: 'inline-flex', alignItems: 'center', gap: 8, background: '#ff6b5b', color: '#fff', border: 'none', borderRadius: 999, padding: '11px 16px', fontSize: 13.5, fontWeight: 600, cursor: locating ? 'default' : 'pointer', opacity: locating ? 0.72 : 1, boxShadow: '0 4px 14px rgba(0,0,0,.3)', fontFamily: "'Outfit', sans-serif" }}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round">
+            <circle cx="12" cy="12" r="4" />
+            <line x1="12" y1="2" x2="12" y2="5" />
+            <line x1="12" y1="19" x2="12" y2="22" />
+            <line x1="2" y1="12" x2="5" y2="12" />
+            <line x1="19" y1="12" x2="22" y2="12" />
+          </svg>
+          {locating ? 'Locating…' : 'Near me'}
+        </button>
+      )}
 
       {!sheet && (
-        <div style={{ position: 'fixed', left: '50%', bottom: 14, transform: 'translateX(-50%)', zIndex: 20, background: 'rgba(26,26,46,.86)', color: '#fff', fontSize: 12.5, padding: '8px 14px', borderRadius: 999, pointerEvents: 'none' }}>
+        <div style={{ position: 'fixed', left: '50%', bottom: 68, transform: 'translateX(-50%)', zIndex: 20, maxWidth: 'calc(100% - 160px)', textAlign: 'center', background: 'rgba(26,26,46,.86)', color: '#fff', fontSize: 12.5, padding: '8px 14px', borderRadius: 999, pointerEvents: 'none' }}>
           Tap any pin, road, area, or story arc to open its page
         </div>
       )}
@@ -376,6 +459,44 @@ function doorwaySheet(close, color, typeLabel, name, meta, body, connects, doorL
           </div>
         ) : null}
         <Link href={href} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, background: '#1a1a2e', color: '#fff', textDecoration: 'none', fontWeight: 600, fontSize: 14, borderRadius: 12, padding: '12px 16px', width: '100%' }}>{doorLabel}</Link>
+      </div>
+    </div>
+  );
+}
+
+function nearmeSheet(close, list) {
+  return (
+    <div className="nm-sheet">
+      <div style={{ maxWidth: 680, margin: '0 auto', background: '#fff', borderRadius: '20px 20px 16px 16px', boxShadow: '0 -10px 40px rgba(0,0,0,.28)', padding: '14px 16px 16px', position: 'relative' }}>
+        <div style={{ width: 38, height: 4, borderRadius: 2, background: '#e2ddd2', margin: '2px auto 12px' }} />
+        <button onClick={close} aria-label="Close" style={{ position: 'absolute', top: 13, right: 14, width: 30, height: 30, border: 'none', borderRadius: '50%', background: '#f3f0e8', color: '#6b7280', fontSize: 17, cursor: 'pointer', lineHeight: 1 }}>×</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: '#2563eb' }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#2563eb', display: 'inline-block' }} />Near you
+        </div>
+        <h2 style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 21, margin: '6px 0 2px', lineHeight: 1.12 }}>Closest places</h2>
+        {list.length === 0 ? (
+          <p style={{ fontSize: 14, lineHeight: 1.5, color: '#3c4256', margin: '8px 0 4px' }}>No nearby places found from here.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '46dvh', overflowY: 'auto', margin: '10px 0 0' }}>
+            {list.map((r) => (
+              <Link key={r.slug} href={`/poi/${r.slug}`} style={{ display: 'flex', gap: 11, alignItems: 'center', textDecoration: 'none', color: 'inherit', background: '#f9f7f1', border: '1px solid #ece9e2', borderRadius: 13, padding: 8 }}>
+                {r.thumbnail_url
+                  ? <img src={r.thumbnail_url} alt="" style={{ width: 54, height: 54, borderRadius: 9, objectFit: 'cover', flex: '0 0 auto' }} />
+                  : <div style={{ width: 54, height: 54, borderRadius: 9, background: getCategoryColor(r.category), flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>{getCategoryEmoji(r.category)}</div>}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 15.5, lineHeight: 1.15, color: '#1a1a2e' }}>{r.name}</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <span style={{ color: getCategoryColor(r.category), fontWeight: 600 }}>{cap(r.category)}</span>{r.nearest_city ? ` · ${r.nearest_city}` : ''}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right', flex: '0 0 auto' }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: '#1a1a2e' }}>{fmtMiles(r.distance_miles)}</div>
+                  <div style={{ fontSize: 9.5, color: '#9aa0c0', letterSpacing: '.06em' }}>MILES</div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
