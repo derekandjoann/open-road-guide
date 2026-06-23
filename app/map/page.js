@@ -90,7 +90,7 @@ export default function MapPage() {
         const [poiR, routeR, regionR, regionPoiR, storyR, storyPoiR] = await Promise.all([
           supabase.from('pois').select('id,slug,name,latitude,longitude,category,tagline,thumbnail_url').eq('published', true),
           supabase.from('routes').select('slug,name,total_miles,short_description,path_geojson').eq('published', true),
-          supabase.from('regions').select('id,slug,name,short_description').eq('published', true),
+          supabase.from('regions').select('id,slug,name,short_description,bounds').eq('published', true),
           supabase.from('region_pois').select('region_id,poi_id'),
           supabase.from('stories').select('id,slug,title,story_type,excerpt').eq('published', true),
           supabase.from('story_pois').select('story_id,poi_id,sort_order'),
@@ -129,11 +129,20 @@ export default function MapPage() {
         });
         const regionFeatures = [];
         (regionR.data || []).forEach((rg, i) => {
-          const ring = convexHull(regionMembers.get(rg.id) || []);
-          if (!ring) return;
+          // Prefer authored bounds (county-dissolved GeoJSON Polygon/MultiPolygon);
+          // fall back to a convex hull of member POIs when bounds is null.
+          let geometry = null;
+          const b = rg.bounds;
+          if (b && (b.type === 'Polygon' || b.type === 'MultiPolygon') && Array.isArray(b.coordinates)) {
+            geometry = b;
+          } else {
+            const ring = convexHull(regionMembers.get(rg.id) || []);
+            if (ring) geometry = { type: 'Polygon', coordinates: [ring] };
+          }
+          if (!geometry) return;
           regionFeatures.push({
             type: 'Feature',
-            geometry: { type: 'Polygon', coordinates: [ring] },
+            geometry,
             properties: { kind: 'region', slug: rg.slug, name: rg.name, desc: rg.short_description || '', color: REGION_PALETTE[i % REGION_PALETTE.length], count: (regionMembers.get(rg.id) || []).length },
           });
         });
