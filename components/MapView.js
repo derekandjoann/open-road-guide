@@ -19,6 +19,13 @@ export default function MapView({
   const mapRef = useRef(null);
   const markersRef = useRef([]);
   const histMarkersRef = useRef([]);
+  // Keep the latest click handler without making it an effect dependency, so a
+  // click (which hands the parent a fresh callback) never rebuilds the markers.
+  const onMarkerClickRef = useRef(onMarkerClick);
+  onMarkerClickRef.current = onMarkerClick;
+  // Signature of the last set we framed, so we only re-fit when the visible
+  // POIs/route actually change — not on a click or an unrelated re-render.
+  const lastFitRef = useRef('');
   const [mapLoaded, setMapLoaded] = useState(false);
 
   useEffect(() => {
@@ -191,7 +198,7 @@ export default function MapView({
 
       // Handle click callback for sidebar highlighting
       marker.getElement().addEventListener('click', () => {
-        if (onMarkerClick) onMarkerClick(poi);
+        if (onMarkerClickRef.current) onMarkerClickRef.current(poi);
       });
 
       markersRef.current.push(marker);
@@ -202,26 +209,36 @@ export default function MapView({
     // well beyond its endpoints (a canyon switchback, a loop) never gets
     // clipped at the map edge. Historical markers still stay out of bounds
     // math; they're roadside texture, not framing.
-    const bounds = new maplibregl.LngLatBounds();
-    let boundPoints = 0;
-    pois.forEach((poi) => {
-      if (poi.longitude && poi.latitude) {
-        bounds.extend([poi.longitude, poi.latitude]);
-        boundPoints += 1;
-      }
-    });
-    if (Array.isArray(routeLine)) {
-      routeLine.forEach((coord) => {
-        if (Array.isArray(coord) && coord.length >= 2) {
-          bounds.extend([coord[0], coord[1]]);
+    //
+    // Only re-frame when the framed set actually changes (a new filter, a
+    // different route). A marker click or an unrelated parent re-render leaves
+    // the signature unchanged, so the reader's chosen zoom is preserved.
+    const fitSig =
+      pois.map((p) => (p.id != null ? p.id : `${p.longitude},${p.latitude}`)).join('|') +
+      '::' + (Array.isArray(routeLine) ? routeLine.length : 0);
+    if (fitSig !== lastFitRef.current) {
+      const bounds = new maplibregl.LngLatBounds();
+      let boundPoints = 0;
+      pois.forEach((poi) => {
+        if (poi.longitude && poi.latitude) {
+          bounds.extend([poi.longitude, poi.latitude]);
           boundPoints += 1;
         }
       });
+      if (Array.isArray(routeLine)) {
+        routeLine.forEach((coord) => {
+          if (Array.isArray(coord) && coord.length >= 2) {
+            bounds.extend([coord[0], coord[1]]);
+            boundPoints += 1;
+          }
+        });
+      }
+      if (boundPoints > 1) {
+        map.fitBounds(bounds, { padding: 50, maxZoom: 12 });
+        lastFitRef.current = fitSig;
+      }
     }
-    if (boundPoints > 1) {
-      map.fitBounds(bounds, { padding: 50, maxZoom: 12 });
-    }
-  }, [pois, routeLine, mapLoaded, compact, markerColor, onMarkerClick]);
+  }, [pois, routeLine, mapLoaded, compact, markerColor]);
 
   // Historical marker layer — smaller violet pins, separate from POI markers.
   // These are roadside texture: they never participate in fitBounds (the POIs
