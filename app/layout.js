@@ -1,6 +1,6 @@
 import './globals.css';
 import Script from 'next/script';
-import Nav from './components/Nav';
+import Nav from './components/nav';
 
 export const metadata = {
   title: 'Open Road Guide — Discover Utah Road Trip Stops',
