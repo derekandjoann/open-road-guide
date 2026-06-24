@@ -68,7 +68,7 @@ export default function MapPage() {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
-  const [state, setState] = useState({ pois: true, routes: true, regions: false, stories: false });
+  const [state, setState] = useState({ pois: true, routes: true, regions: false, stories: false, markers: false });
   const [sheet, setSheet] = useState(null); // { kind, ...props }
   const [locating, setLocating] = useState(false);
   const [geoErr, setGeoErr] = useState('');
@@ -111,13 +111,16 @@ export default function MapPage() {
     let cancelled = false;
     (async () => {
       try {
-        const [poiR, routeR, regionR, regionPoiR, storyR, storyPoiR] = await Promise.all([
+        const [poiR, routeR, regionR, regionPoiR, storyR, storyPoiR, markerR] = await Promise.all([
           supabase.from('pois').select('id,slug,name,latitude,longitude,category,tagline,thumbnail_url').eq('published', true),
           supabase.from('routes').select('slug,name,total_miles,short_description,path_geojson').eq('published', true),
           supabase.from('regions').select('id,slug,name,short_description,bounds').eq('published', true),
           supabase.from('region_pois').select('region_id,poi_id'),
           supabase.from('stories').select('id,slug,title,story_type,excerpt').eq('published', true),
           supabase.from('story_pois').select('story_id,poi_id,sort_order'),
+          // Historical markers: one prebuilt GeoJSON FeatureCollection (single row,
+          // so it clears PostgREST's 1000-row cap for the ~1,500 statewide markers).
+          supabase.rpc('markers_overlay'),
         ]);
         if (cancelled) return;
         if (poiR.error) throw poiR.error;
@@ -206,13 +209,20 @@ export default function MapPage() {
           }));
         });
 
+        // Historical markers come back as a ready FeatureCollection from the RPC.
+        // Defensive: a marker failure must never blank the other overlays.
+        const markerFC = (markerR && !markerR.error && markerR.data && Array.isArray(markerR.data.features))
+          ? markerR.data
+          : fc([]);
+
         setData({
-          counts: { pois: poiFeatures.length, routes: routeFeatures.length, regions: regionFeatures.length, stories: (storyR.data || []).length },
+          counts: { pois: poiFeatures.length, routes: routeFeatures.length, regions: regionFeatures.length, stories: (storyR.data || []).length, markers: markerFC.features.length },
           poiFC: fc(poiFeatures),
           routeFC: fc(routeFeatures),
           regionFC: fc(regionFeatures),
           storyArcFC: fc(storyArcFeatures),
           storyPtFC: fc(storyPointFeatures),
+          markerFC,
           storyDetail,
         });
       } catch (e) {
@@ -257,13 +267,45 @@ export default function MapPage() {
       map.addSource('nearme', { type: 'geojson', data: fc([]) });
       map.addLayer({ id: 'nearme-rings', type: 'circle', source: 'nearme', paint: { 'circle-radius': 13, 'circle-color': '#2563eb', 'circle-opacity': 0.12, 'circle-stroke-color': '#2563eb', 'circle-stroke-width': 2, 'circle-stroke-opacity': 0.85 } });
     });
+    // Historical markers — clustered so ~1,500 statewide points never blanket the
+    // map. Bronze/plaque tone sets them apart from the coral-and-category POI pins.
+    // No text layers (the style declares no glyphs); cluster size reads by radius,
+    // and tapping a cluster zooms in to break it apart.
+    tryAdd(() => {
+      map.addSource('markers', { type: 'geojson', data: data.markerFC, cluster: true, clusterRadius: 46, clusterMaxZoom: 11 });
+      map.addLayer({
+        id: 'markers-clusters', type: 'circle', source: 'markers',
+        filter: ['has', 'point_count'],
+        layout: { visibility: vis(state.markers) },
+        paint: {
+          'circle-color': '#a9763e',
+          'circle-opacity': 0.86,
+          'circle-stroke-color': '#3f2e1a',
+          'circle-stroke-width': 1.4,
+          'circle-radius': ['step', ['get', 'point_count'], 13, 15, 16, 50, 20, 150, 25, 400, 31],
+        },
+      });
+      map.addLayer({
+        id: 'markers-unclustered', type: 'circle', source: 'markers',
+        filter: ['!', ['has', 'point_count']],
+        layout: { visibility: vis(state.markers) },
+        paint: {
+          // Told markers (curated, with a note) read brighter with a cream ring;
+          // cataloged markers sit flatter with a dark bronze edge.
+          'circle-color': ['case', ['get', 'told'], '#c89a5e', '#a9763e'],
+          'circle-radius': ['case', ['get', 'told'], 6.5, 4.6],
+          'circle-stroke-color': ['case', ['get', 'told'], '#f3e4c4', '#5e4427'],
+          'circle-stroke-width': ['case', ['get', 'told'], 2.2, 1.3],
+        },
+      });
+    });
     // POIs (top)
     tryAdd(() => {
       map.addSource('pois', { type: 'geojson', data: data.poiFC });
       map.addLayer({ id: 'pois-layer', type: 'circle', source: 'pois', layout: { visibility: vis(state.pois) }, paint: { 'circle-radius': 5.5, 'circle-color': ['get', 'color'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.6 } });
     });
 
-    ['pois-layer', 'routes-line', 'regions-fill', 'story-arcs', 'story-rings'].forEach((id) => {
+    ['pois-layer', 'routes-line', 'regions-fill', 'story-arcs', 'story-rings', 'markers-clusters', 'markers-unclustered'].forEach((id) => {
       if (!map.getLayer(id)) return;
       map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
@@ -277,8 +319,21 @@ export default function MapPage() {
     } catch (e) { /* keep default view */ }
 
     // Unified click → doorway sheet (priority: pins above lines above areas).
-    map.on('click', (e) => {
-      const order = [['pois-layer'], ['story-rings'], ['story-arcs'], ['routes-line'], ['regions-fill']];
+    map.on('click', async (e) => {
+      // A marker cluster takes precedence: zoom in to break it apart rather than
+      // open a sheet.
+      if (map.getLayer('markers-clusters') && map.getLayoutProperty('markers-clusters', 'visibility') !== 'none') {
+        const cl = map.queryRenderedFeatures(e.point, { layers: ['markers-clusters'] });
+        if (cl.length) {
+          const cid = cl[0].properties.cluster_id;
+          try {
+            const z = await map.getSource('markers').getClusterExpansionZoom(cid);
+            map.easeTo({ center: cl[0].geometry.coordinates, zoom: z, duration: 600 });
+          } catch (err) { /* ignore expansion failure */ }
+          return;
+        }
+      }
+      const order = [['pois-layer'], ['markers-unclustered'], ['story-rings'], ['story-arcs'], ['routes-line'], ['regions-fill']];
       for (const [id] of order) {
         if (!map.getLayer(id) || map.getLayoutProperty(id, 'visibility') === 'none') continue;
         const hits = map.queryRenderedFeatures(e.point, { layers: [id] });
@@ -357,7 +412,7 @@ export default function MapPage() {
   function toggle(layer) {
     const next = { ...state, [layer]: !state[layer] };
     setState(next);
-    const groups = { pois: ['pois-layer'], routes: ['routes-casing', 'routes-line'], regions: ['regions-fill', 'regions-outline'], stories: ['story-arcs', 'story-rings'] };
+    const groups = { pois: ['pois-layer'], routes: ['routes-casing', 'routes-line'], regions: ['regions-fill', 'regions-outline'], stories: ['story-arcs', 'story-rings'], markers: ['markers-clusters', 'markers-unclustered'] };
     const map = mapRef.current;
     if (map) groups[layer].forEach((id) => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis(next[layer])); });
   }
@@ -368,6 +423,7 @@ export default function MapPage() {
     { key: 'routes', label: 'Routes', sw: <span style={{ width: 16, height: 4, borderRadius: 2, background: '#ff6b5b' }} /> },
     { key: 'regions', label: 'Regions', sw: <span style={{ width: 13, height: 13, borderRadius: 4, background: 'rgba(124,92,252,.35)', border: '1px solid #7c5cfc' }} /> },
     { key: 'stories', label: 'Stories', sw: <span style={{ width: 16, borderTop: '3px dashed #7c5cfc' }} /> },
+    { key: 'markers', label: 'Markers', sw: <span style={{ width: 13, height: 13, borderRadius: '50%', background: '#a9763e', border: '1px solid #5e4427' }} /> },
   ];
 
   // Sheet content
@@ -384,6 +440,8 @@ export default function MapPage() {
     } else if (k === 'story') {
       const det = (data && data.storyDetail[sheet.slug]) || { connects: [] };
       sheetEl = doorwaySheet(close, sheet.color, `${sheet.stype} · Story`, sheet.title, '', sheet.excerpt, det.connects, 'Read the story →', `/story/${sheet.slug}`);
+    } else if (k === 'marker') {
+      sheetEl = markerSheet(close, sheet);
     } else if (k === 'nearme') {
       sheetEl = nearmeSheet(close, sheet.list || []);
     }
@@ -476,6 +534,36 @@ function doorwaySheet(close, color, typeLabel, name, meta, body, connects, doorL
           </div>
         ) : null}
         <Link href={href} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, background: '#1a1a2e', color: '#fff', textDecoration: 'none', fontWeight: 600, fontSize: 14, borderRadius: 12, padding: '12px 16px', width: '100%' }}>{doorLabel}</Link>
+      </div>
+    </div>
+  );
+}
+
+function markerSheet(close, m) {
+  const told = m.told === true || m.told === 'true';
+  const place = [m.city, m.county ? `${m.county} County` : null].filter(Boolean).join(', ');
+  const meta = [m.year ? `Erected ${m.year}` : null, m.erected_by, place].filter(Boolean).join(' · ');
+  const body = told && m.note
+    ? m.note
+    : (m.commemorates ? `Commemorates ${m.commemorates}.` : null);
+  const color = '#a9763e';
+  return (
+    <div className="nm-sheet">
+      <div style={{ maxWidth: 680, margin: '0 auto', background: '#fff', borderRadius: '20px 20px 16px 16px', boxShadow: '0 -10px 40px rgba(0,0,0,.28)', padding: '16px 18px 18px', position: 'relative' }}>
+        <div style={{ width: 38, height: 4, borderRadius: 2, background: '#e2ddd2', margin: '2px auto 12px' }} />
+        <button onClick={close} aria-label="Close" style={{ position: 'absolute', top: 13, right: 14, width: 30, height: 30, border: 'none', borderRadius: '50%', background: '#f3f0e8', color: '#6b7280', fontSize: 17, cursor: 'pointer', lineHeight: 1 }}>×</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color }}>
+          <span style={{ width: 9, height: 9, borderRadius: '50%', background: color, display: 'inline-block' }} />Historical Marker
+        </div>
+        <h2 style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 21, margin: '6px 0 3px', lineHeight: 1.12, paddingRight: 30 }}>{m.name}</h2>
+        {meta ? <div style={{ fontSize: 12.5, color: '#6b7280', marginBottom: 9 }}>{meta}</div> : null}
+        {body ? <p style={{ fontSize: 14, lineHeight: 1.5, color: '#3c4256', margin: '0 0 12px' }}>{body}</p> : <div style={{ height: 4 }} />}
+        {m.url ? (
+          <a href={m.url} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: '#1a1a2e', textDecoration: 'none', borderBottom: '1px solid #d8d2c4', paddingBottom: 1 }}>State record →</a>
+        ) : null}
+        {!told ? (
+          <div style={{ fontSize: 11, color: '#9aa0a8', marginTop: 12, lineHeight: 1.4 }}>From the Utah Division of State History monuments &amp; markers survey.</div>
+        ) : null}
       </div>
     </div>
   );
