@@ -54,9 +54,6 @@ export default function ExplorePage() {
   // legacy substring filter below applies, so search never breaks.
   const [searchResults, setSearchResults] = useState(null);
   const [selectedPoi, setSelectedPoi] = useState(null);
-  // Historical markers — the violet pin layer. Loaded once; not filtered,
-  // searched, or counted with POIs. They are roadside texture on the map.
-  const [histMarkers, setHistMarkers] = useState([]);
   const [loading, setLoading] = useState(true);
   // Mobile layout switch: stack map over list below 768px. matchMedia with a
   // change listener keeps it correct through rotation; initial false avoids
@@ -116,20 +113,6 @@ export default function ExplorePage() {
       setLoading(false);
     }
     fetchPois();
-
-    // Historical marker layer — fetched separately so a failure here can
-    // never affect the POI list; the map simply renders without violet pins.
-    async function fetchMarkers() {
-      const { data, error } = await supabase
-        .from('markers')
-        .select('id, name, latitude, longitude, erected_by, year_erected, note');
-      if (error) {
-        console.error('Error fetching historical markers:', error);
-      } else {
-        setHistMarkers(data || []);
-      }
-    }
-    fetchMarkers();
   }, []);
 
   // Full-text search via the search_pois() RPC — debounced, race-safe.
@@ -510,7 +493,6 @@ export default function ExplorePage() {
           ) : (
             <MapView
               pois={filteredPois}
-              historicalMarkers={histMarkers}
               interactive={true}
               height="100%"
               compact={false}
