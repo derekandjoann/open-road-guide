@@ -409,6 +409,21 @@ export default function MapPage() {
     }
   }, [mapLoaded]);
 
+  // Near-me highlight rings and the location dot belong to the "Closest places"
+  // sheet — they're a momentary highlight, not a toggleable layer. Once that
+  // sheet is dismissed (or any other sheet opens), clear them so the map resets
+  // to a clean state instead of stranding blue circles that answer to no toggle.
+  useEffect(() => {
+    if (sheet && sheet.kind === 'nearme') return;
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      const src = map.getSource('nearme');
+      if (src) src.setData(fc([]));
+    } catch (e) { /* source not added yet */ }
+    if (userMarkerRef.current) { userMarkerRef.current.remove(); userMarkerRef.current = null; }
+  }, [sheet]);
+
   function toggle(layer) {
     const next = { ...state, [layer]: !state[layer] };
     setState(next);
