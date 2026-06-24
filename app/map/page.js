@@ -267,35 +267,30 @@ export default function MapPage() {
       map.addSource('nearme', { type: 'geojson', data: fc([]) });
       map.addLayer({ id: 'nearme-rings', type: 'circle', source: 'nearme', paint: { 'circle-radius': 13, 'circle-color': '#2563eb', 'circle-opacity': 0.12, 'circle-stroke-color': '#2563eb', 'circle-stroke-width': 2, 'circle-stroke-opacity': 0.85 } });
     });
-    // Historical markers — clustered so ~1,500 statewide points never blanket the
-    // map. Bronze/plaque tone sets them apart from the coral-and-category POI pins.
-    // No text layers (the style declares no glyphs); cluster size reads by radius,
-    // and tapping a cluster zooms in to break it apart.
+    // Historical markers — individual circles, no clustering. They stay distinct
+    // and spread apart as you zoom in: small bronze dots at statewide view that
+    // grow into separate, tappable circles up close, rather than gathering into
+    // one count-blob. Told markers (curated, with a note) read brighter with a
+    // cream ring; cataloged markers sit flatter with a dark bronze edge.
     tryAdd(() => {
-      map.addSource('markers', { type: 'geojson', data: data.markerFC, cluster: true, clusterRadius: 46, clusterMaxZoom: 11 });
+      map.addSource('markers', { type: 'geojson', data: data.markerFC });
       map.addLayer({
-        id: 'markers-clusters', type: 'circle', source: 'markers',
-        filter: ['has', 'point_count'],
+        id: 'markers-layer', type: 'circle', source: 'markers',
         layout: { visibility: vis(state.markers) },
         paint: {
-          'circle-color': '#a9763e',
-          'circle-opacity': 0.86,
-          'circle-stroke-color': '#3f2e1a',
-          'circle-stroke-width': 1.4,
-          'circle-radius': ['step', ['get', 'point_count'], 13, 15, 16, 50, 20, 150, 25, 400, 31],
-        },
-      });
-      map.addLayer({
-        id: 'markers-unclustered', type: 'circle', source: 'markers',
-        filter: ['!', ['has', 'point_count']],
-        layout: { visibility: vis(state.markers) },
-        paint: {
-          // Told markers (curated, with a note) read brighter with a cream ring;
-          // cataloged markers sit flatter with a dark bronze edge.
           'circle-color': ['case', ['get', 'told'], '#c89a5e', '#a9763e'],
-          'circle-radius': ['case', ['get', 'told'], 6.5, 4.6],
+          // Radius scales with zoom so dense points separate as you zoom in
+          // instead of overlapping into a single mass.
+          'circle-radius': [
+            'interpolate', ['linear'], ['zoom'],
+            5, ['case', ['get', 'told'], 3, 2.1],
+            9, ['case', ['get', 'told'], 4.6, 3.4],
+            13, ['case', ['get', 'told'], 7, 5.4],
+            16, ['case', ['get', 'told'], 9, 7],
+          ],
+          'circle-opacity': 0.9,
           'circle-stroke-color': ['case', ['get', 'told'], '#f3e4c4', '#5e4427'],
-          'circle-stroke-width': ['case', ['get', 'told'], 2.2, 1.3],
+          'circle-stroke-width': ['case', ['get', 'told'], 2, 1.2],
         },
       });
     });
@@ -305,7 +300,7 @@ export default function MapPage() {
       map.addLayer({ id: 'pois-layer', type: 'circle', source: 'pois', layout: { visibility: vis(state.pois) }, paint: { 'circle-radius': 5.5, 'circle-color': ['get', 'color'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.6 } });
     });
 
-    ['pois-layer', 'routes-line', 'regions-fill', 'story-arcs', 'story-rings', 'markers-clusters', 'markers-unclustered'].forEach((id) => {
+    ['pois-layer', 'routes-line', 'regions-fill', 'story-arcs', 'story-rings', 'markers-layer'].forEach((id) => {
       if (!map.getLayer(id)) return;
       map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
@@ -319,21 +314,8 @@ export default function MapPage() {
     } catch (e) { /* keep default view */ }
 
     // Unified click → doorway sheet (priority: pins above lines above areas).
-    map.on('click', async (e) => {
-      // A marker cluster takes precedence: zoom in to break it apart rather than
-      // open a sheet.
-      if (map.getLayer('markers-clusters') && map.getLayoutProperty('markers-clusters', 'visibility') !== 'none') {
-        const cl = map.queryRenderedFeatures(e.point, { layers: ['markers-clusters'] });
-        if (cl.length) {
-          const cid = cl[0].properties.cluster_id;
-          try {
-            const z = await map.getSource('markers').getClusterExpansionZoom(cid);
-            map.easeTo({ center: cl[0].geometry.coordinates, zoom: z, duration: 600 });
-          } catch (err) { /* ignore expansion failure */ }
-          return;
-        }
-      }
-      const order = [['pois-layer'], ['markers-unclustered'], ['story-rings'], ['story-arcs'], ['routes-line'], ['regions-fill']];
+    map.on('click', (e) => {
+      const order = [['pois-layer'], ['markers-layer'], ['story-rings'], ['story-arcs'], ['routes-line'], ['regions-fill']];
       for (const [id] of order) {
         if (!map.getLayer(id) || map.getLayoutProperty(id, 'visibility') === 'none') continue;
         const hits = map.queryRenderedFeatures(e.point, { layers: [id] });
@@ -427,7 +409,7 @@ export default function MapPage() {
   function toggle(layer) {
     const next = { ...state, [layer]: !state[layer] };
     setState(next);
-    const groups = { pois: ['pois-layer'], routes: ['routes-casing', 'routes-line'], regions: ['regions-fill', 'regions-outline'], stories: ['story-arcs', 'story-rings'], markers: ['markers-clusters', 'markers-unclustered'] };
+    const groups = { pois: ['pois-layer'], routes: ['routes-casing', 'routes-line'], regions: ['regions-fill', 'regions-outline'], stories: ['story-arcs', 'story-rings'], markers: ['markers-layer'] };
     const map = mapRef.current;
     if (map) groups[layer].forEach((id) => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis(next[layer])); });
   }
@@ -573,7 +555,9 @@ function markerSheet(close, m) {
         <h2 style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 21, margin: '6px 0 3px', lineHeight: 1.12, paddingRight: 30 }}>{m.name}</h2>
         {meta ? <div style={{ fontSize: 12.5, color: '#6b7280', marginBottom: 9 }}>{meta}</div> : null}
         {body ? <p style={{ fontSize: 14, lineHeight: 1.5, color: '#3c4256', margin: '0 0 12px' }}>{body}</p> : <div style={{ height: 4 }} />}
-        {m.url ? (
+        {m.hmdb_url ? (
+          <a href={m.hmdb_url} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: '#1a1a2e', textDecoration: 'none', borderBottom: '1px solid #d8d2c4', paddingBottom: 1 }}>Full inscription &amp; photos →</a>
+        ) : m.url ? (
           <a href={m.url} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: '#1a1a2e', textDecoration: 'none', borderBottom: '1px solid #d8d2c4', paddingBottom: 1 }}>State record →</a>
         ) : null}
         {!told ? (
