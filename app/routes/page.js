@@ -34,33 +34,75 @@ const ROUTE_COLORS = [
 // or remove entries as they get added to the database.
 const COMING_SOON = [];
 
+// A route belongs to a state if that state is its primary state OR appears in
+// its crossing_states[]. Single predicate used by both the chip roster and the
+// visible-set filter, so they can never disagree.
+function routeInState(route, stateName) {
+  if (route.state === stateName) return true;
+  return (
+    Array.isArray(route.crossing_states) &&
+    route.crossing_states.includes(stateName)
+  );
+}
+
 export default function RoutesIndexPage() {
   const [routes, setRoutes] = useState([]);
+  // States that actually have published routes (primary or crossing), in
+  // states-table sort order: [{ slug, name }]. Drives the filter chips.
+  const [stateOptions, setStateOptions] = useState([]);
+  // null = "All". Otherwise the canonical state name (e.g. "Nevada").
+  const [activeState, setActiveState] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const { data } = await supabase
-        .from('routes')
-        .select('*')
-        .eq('published', true)
-        .order('name', { ascending: true });
+      // select('*') carries crossing_states along for the belong-to-state test.
+      // States roster fetched in parallel for the chips' slug/order language.
+      const [{ data: routeData }, { data: stateData }] = await Promise.all([
+        supabase
+          .from('routes')
+          .select('*')
+          .eq('published', true)
+          .order('name', { ascending: true }),
+        supabase
+          .from('states')
+          .select('slug, name')
+          .eq('published', true)
+          .order('sort_order', { ascending: true }),
+      ]);
 
       // Assign each route its color by name-sorted index, so the map line and
-      // the card always agree. Routes without geometry still get a card color.
-      const withColor = (data || []).map((r, i) => ({
+      // the card always agree. Done over the FULL set before any filtering, so
+      // a route's color never shifts when a state lens is applied.
+      const withColor = (routeData || []).map((r, i) => ({
         ...r,
         _color: ROUTE_COLORS[i % ROUTE_COLORS.length],
       }));
 
+      // Offer a chip for any state with ≥1 belonging route (primary OR
+      // crossing). Today that's Utah only, so the row stays hidden; the moment
+      // a Nevada route (or a UT→NV crossing) lands, the chip appears on its own.
+      const options = (stateData || []).filter((s) =>
+        withColor.some((r) => routeInState(r, s.name))
+      );
+
       setRoutes(withColor);
+      setStateOptions(options);
+
+      // Honour an incoming ?state=<slug> deep-link from a hub's "drives" path.
+      const params = new URLSearchParams(window.location.search);
+      const wanted = (params.get('state') || '').toLowerCase();
+      const match = options.find((s) => s.slug === wanted);
+      setActiveState(match ? match.name : null);
+
       setLoading(false);
     }
     load();
   }, []);
 
-  // SEO meta tags
+  // SEO meta tags. Canonical stays on bare /routes — ?state= is a filter,
+  // not a distinct indexable page.
   useEffect(() => {
     const title = 'Routes | Open Road Guide';
     const desc =
@@ -93,8 +135,25 @@ export default function RoutesIndexPage() {
     canonical.setAttribute('href', 'https://openroadguide.com/routes');
   }, []);
 
-  // Map data: every published route that has a traced path_geojson line.
-  const routeMapData = routes
+  // Apply a state lens. Writes the choice to the URL (shallow, no reload) so the
+  // filtered view is shareable and hub deep-links round-trip cleanly.
+  function applyState(option) {
+    const name = option ? option.name : null;
+    setActiveState(name);
+
+    const url = new URL(window.location.href);
+    if (option) url.searchParams.set('state', option.slug);
+    else url.searchParams.delete('state');
+    window.history.replaceState({}, '', url);
+  }
+
+  // The visible set after the lens — primary state OR a crossing match.
+  const visibleRoutes = activeState
+    ? routes.filter((r) => routeInState(r, activeState))
+    : routes;
+
+  // Map data: every visible route that has a traced path_geojson line.
+  const routeMapData = visibleRoutes
     .filter((r) => Array.isArray(r.path_geojson) && r.path_geojson.length > 1)
     .map((r) => ({ slug: r.slug, name: r.name, path: r.path_geojson, color: r._color }));
 
@@ -119,7 +178,26 @@ export default function RoutesIndexPage() {
         </p>
       </header>
 
-      {/* Explorable map of every byway */}
+      {/* State lens — only shown once more than one state has routes */}
+      {!loading && stateOptions.length > 1 && (
+        <div style={styles.filterRow} role="group" aria-label="Filter routes by state">
+          <FilterChip
+            label="All"
+            active={activeState === null}
+            onClick={() => applyState(null)}
+          />
+          {stateOptions.map((s) => (
+            <FilterChip
+              key={s.slug}
+              label={s.name}
+              active={activeState === s.name}
+              onClick={() => applyState(s)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Explorable map of every byway (in the current lens) */}
       {!loading && routeMapData.length > 0 && (
         <section style={styles.mapSection}>
           <CategoryMap mode="routes" routes={routeMapData} />
@@ -132,17 +210,20 @@ export default function RoutesIndexPage() {
       {/* Route cards */}
       {loading ? (
         <div style={styles.loading}>Loading routes…</div>
+      ) : visibleRoutes.length === 0 ? (
+        <div style={styles.loading}>No published routes in {activeState} yet.</div>
       ) : (
         <section style={styles.cardsGrid}>
           {/* Real routes from Supabase */}
-          {routes.map((route) => (
+          {visibleRoutes.map((route) => (
             <RouteCard key={route.id} route={route} color={route._color} />
           ))}
 
-          {/* Coming soon placeholders */}
-          {COMING_SOON.map((r, i) => (
-            <ComingSoonCard key={`cs-${i}`} route={r} />
-          ))}
+          {/* Coming soon placeholders — only in the All view (they carry no state) */}
+          {activeState === null &&
+            COMING_SOON.map((r, i) => (
+              <ComingSoonCard key={`cs-${i}`} route={r} />
+            ))}
         </section>
       )}
     </main>
@@ -150,6 +231,22 @@ export default function RoutesIndexPage() {
 }
 
 // ---- Sub-components ----
+
+function FilterChip({ label, active, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      style={{
+        ...styles.chip,
+        ...(active ? styles.chipActive : styles.chipIdle),
+      }}
+    >
+      {label}
+    </button>
+  );
+}
 
 function RouteCard({ route, color }) {
   const c = color || COLORS.coral;
@@ -283,6 +380,36 @@ const styles = {
     margin: 0,
     fontStyle: 'italic',
     fontFamily: "'Fraunces', Georgia, serif",
+  },
+
+  // State lens filter
+  filterRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '0.6rem',
+    marginBottom: '2rem',
+    alignItems: 'center',
+  },
+  chip: {
+    fontFamily: "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif",
+    fontSize: '0.9rem',
+    fontWeight: 600,
+    letterSpacing: '0.02em',
+    padding: '0.5rem 1.1rem',
+    borderRadius: '999px',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    lineHeight: 1.2,
+  },
+  chipIdle: {
+    background: '#fff',
+    color: COLORS.warmGray,
+    border: '1.5px solid #e2e2e2',
+  },
+  chipActive: {
+    background: COLORS.ink,
+    color: '#fff',
+    border: `1.5px solid ${COLORS.ink}`,
   },
 
   // Map
