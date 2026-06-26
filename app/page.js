@@ -1,406 +1,270 @@
-'use client';
-
-import { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import Link from 'next/link';
+import { createClient } from '@supabase/supabase-js';
 import MapView from '../components/MapView';
 import MapLegend from '../components/MapLegend';
-import { getCategoryColor, getCategoryEmoji } from '../lib/categoryColors';
-import { toSlug } from '../lib/slug';
 
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
-export default function HomePage() {
-  const [pois, setPois] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
+function heroSrc(url, width = 1200) {
+  if (!url) return '';
+  if (!url.includes('/storage/v1/object/public/')) return url;
+  const base = url.replace(
+    '/storage/v1/object/public/',
+    '/storage/v1/render/image/public/'
+  );
+  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
+}
 
-  useEffect(() => {
-    async function fetchPois() {
-      const { data, error } = await supabase
-        .from('pois')
-        .select('*')
-        .order('name');
+const COLORS = {
+  coral: '#FF6B6B',
+  teal: '#4ECDC4',
+  yellow: '#FFD93D',
+  violet: '#9D4EDD',
+  ink: '#1a1a2e',
+  paper: '#FFF8F0',
+  warmGray: '#666',
+};
 
-      if (error) {
-        console.error('Error fetching POIs:', error);
-      } else {
-        setPois(data);
-        const cats = [...new Set(data.map(p => p.category).filter(Boolean))].sort();
-        setCategories(cats);
-      }
-      setLoading(false);
-    }
-    fetchPois();
-  }, []);
+export const metadata = {
+  title: { absolute: 'Open Road Guide — Road Trip Guides to the American West' },
+  description:
+    'Field-tested road trip guides to the American West — the parks, ghost towns, scenic drives, and roadside stories most maps leave out. Pick a state and start exploring.',
+  alternates: { canonical: 'https://openroadguide.com' },
+  openGraph: {
+    title: 'Open Road Guide — Road Trip Guides to the American West',
+    description:
+      'Pick a state and start exploring — the parks, ghost towns, scenic drives, and roadside stories most maps leave out.',
+    type: 'website',
+    url: 'https://openroadguide.com',
+  },
+};
 
-  // Pick featured POIs — spread across categories
-  const featured = [];
-  const usedCats = new Set();
-  for (const poi of pois) {
-    if (featured.length >= 6) break;
-    if (poi.tagline && !usedCats.has(poi.category)) {
-      featured.push(poi);
-      usedCats.add(poi.category);
-    }
-  }
-  if (featured.length < 6) {
-    for (const poi of pois) {
-      if (featured.length >= 6) break;
-      if (poi.tagline && !featured.includes(poi)) {
-        featured.push(poi);
-      }
-    }
-  }
+export default async function HomePage() {
+  const [stateRes, poiRes] = await Promise.all([
+    supabase
+      .from('states')
+      .select('*')
+      .eq('published', true)
+      .order('sort_order', { ascending: true }),
+    supabase
+      .from('pois')
+      .select('id, name, slug, tagline, category, longitude, latitude')
+      .eq('published', true),
+  ]);
+
+  const states = stateRes.data || [];
+  const liveStates = states.filter((s) => s.status === 'live');
+  const pois = (poiRes.data || []).filter(
+    (p) => typeof p.longitude === 'number' && typeof p.latitude === 'number'
+  );
+  const categories = [...new Set(pois.map((p) => p.category).filter(Boolean))].sort();
+
+  const statBits = [
+    liveStates.length > 0 && `${liveStates.length} ${liveStates.length === 1 ? 'state' : 'states'}`,
+    pois.length > 0 && `${pois.length} places`,
+    categories.length > 0 && `${categories.length} categories`,
+  ].filter(Boolean);
 
   return (
-    <div style={{ fontFamily: "'Outfit', sans-serif", color: '#1a1a2e' }}>
-
+    <div style={{ fontFamily: "'Outfit', sans-serif", color: COLORS.ink }}>
       {/* ===== HERO ===== */}
-      <section style={{
-        position: 'relative',
-        background: 'linear-gradient(145deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-        padding: '0',
-        minHeight: '85vh',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        overflow: 'hidden',
-      }}>
-        {/* Decorative road lines */}
-        <div style={{
-          position: 'absolute',
-          top: 0, left: 0, right: 0, bottom: 0,
-          opacity: 0.06,
-          background: `repeating-linear-gradient(90deg, transparent, transparent 48%, #ffb627 48%, #ffb627 52%, transparent 52%)`,
-          pointerEvents: 'none',
-        }} />
-        {/* Gradient orbs */}
-        <div style={{
-          position: 'absolute',
-          width: '400px', height: '400px',
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(255,107,91,0.15) 0%, transparent 70%)',
-          top: '-100px', right: '-50px',
-          pointerEvents: 'none',
-        }} />
-        <div style={{
-          position: 'absolute',
-          width: '300px', height: '300px',
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(124,92,252,0.12) 0%, transparent 70%)',
-          bottom: '-50px', left: '10%',
-          pointerEvents: 'none',
-        }} />
-
-        <div style={{
-          position: 'relative',
-          zIndex: 2,
-          maxWidth: '900px',
-          margin: '0 auto',
-          padding: '60px 28px 80px',
-          textAlign: 'center',
-        }}>
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            background: 'rgba(255,182,39,0.15)',
-            border: '1px solid rgba(255,182,39,0.3)',
-            borderRadius: '20px',
-            padding: '6px 16px',
-            marginBottom: '28px',
-          }}>
+      <section style={hero.section}>
+        <div style={hero.roadLines} />
+        <div style={hero.orb} />
+        <div style={hero.inner}>
+          <div style={hero.badge}>
             <span style={{ fontSize: '14px' }}>🛣️</span>
-            <span style={{
-              fontFamily: "'Outfit', sans-serif",
-              fontSize: '13px',
-              fontWeight: 600,
-              color: '#ffb627',
-              textTransform: 'uppercase',
-              letterSpacing: '1px',
-            }}>Now Exploring: Utah</span>
+            <span style={hero.badgeText}>Guides to the American West</span>
           </div>
 
-          <h1 style={{
-            fontFamily: "'Fraunces', serif",
-            fontSize: 'clamp(36px, 6vw, 64px)',
-            fontWeight: 900,
-            color: '#fff',
-            lineHeight: 1.1,
-            marginBottom: '20px',
-          }}>
+          <h1 style={hero.title}>
             Your road trip starts{' '}
-            <span style={{
-              background: 'linear-gradient(135deg, #ff6b5b, #ffb627)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-            }}>here</span>.
+            <span style={hero.titleAccent}>here</span>.
           </h1>
 
-          <p style={{
-            fontSize: 'clamp(16px, 2.5vw, 20px)',
-            color: 'rgba(255,255,255,0.65)',
-            lineHeight: 1.6,
-            maxWidth: '600px',
-            margin: '0 auto 36px',
-          }}>
-            Discover {pois.length} incredible stops across Utah — from red rock
-            canyons to alpine lakes, roadside wonders to hidden gems. We mapped
-            the stories behind the places.
+          <p style={hero.sub}>
+            Field-tested guides to the American West — the parks, the ghost towns, the
+            scenic drives, and the roadside stories most maps leave out. Pick a state
+            below and start exploring.
           </p>
 
-          <div style={{
-            display: 'flex',
-            justifyContent: 'center',
-            gap: '14px',
-            flexWrap: 'wrap',
-          }}>
-            <a href="/explore" style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '14px 32px',
-              background: 'linear-gradient(135deg, #ff6b5b, #ff8a7d)',
-              color: '#fff',
-              fontFamily: "'Outfit', sans-serif",
-              fontWeight: 700,
-              fontSize: '16px',
-              borderRadius: '12px',
-              textDecoration: 'none',
-              boxShadow: '0 4px 20px rgba(255,107,91,0.4)',
-            }}>
-              Browse every stop
-            </a>
-            <a href="/map?near=1" style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '14px 32px',
-              background: 'rgba(255,255,255,0.08)',
-              border: '1.5px solid rgba(255,255,255,0.2)',
-              color: '#fff',
-              fontFamily: "'Outfit', sans-serif",
-              fontWeight: 600,
-              fontSize: '16px',
-              borderRadius: '12px',
-              textDecoration: 'none',
-            }}>
-              What's near me?
-            </a>
+          <div style={hero.ctaRow}>
+            <a href="#states" style={hero.ctaPrimary}>Choose a state</a>
+            <a href="/explore" style={hero.ctaGhost}>Browse every stop</a>
           </div>
 
-          {/* Stats */}
-          <div style={{
-            display: 'flex',
-            justifyContent: 'center',
-            gap: '40px',
-            marginTop: '52px',
-            flexWrap: 'wrap',
-          }}>
-            {[
-              { num: pois.length, label: 'Places' },
-              { num: categories.length, label: 'Categories' },
-              { num: '8+', label: 'Highway Corridors' },
-            ].map((stat) => (
-              <div key={stat.label} style={{ textAlign: 'center' }}>
-                <div style={{
-                  fontFamily: "'Fraunces', serif",
-                  fontSize: '32px',
-                  fontWeight: 800,
-                  color: '#12b5a0',
-                }}>{stat.num}</div>
-                <div style={{
-                  fontSize: '13px',
-                  color: 'rgba(255,255,255,0.45)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px',
-                  fontWeight: 500,
-                }}>{stat.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ===== MAP PREVIEW ===== */}
-      <section id="map-preview" style={{ padding: '64px 28px', background: '#fff' }}>
-        <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: '28px' }}>
-            <h2 style={{
-              fontFamily: "'Fraunces', serif",
-              fontSize: 'clamp(24px, 4vw, 36px)',
-              fontWeight: 800,
-              color: '#1a1a2e',
-              marginBottom: '8px',
-            }}>All of Utah, One Map</h2>
-            <p style={{ fontSize: '16px', color: '#888', maxWidth: '500px', margin: '0 auto' }}>
-              Click any dot to discover what makes each place special.
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
-            <MapLegend categories={categories} />
-          </div>
-
-          {loading ? (
-            <div style={{
-              height: '500px', background: '#f0eeea', borderRadius: '16px',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: '#aaa', fontFamily: "'Fraunces', serif", fontSize: '18px',
-            }}>Loading map...</div>
-          ) : (
-            <MapView pois={pois} interactive={true} height="500px" compact={false} />
+          {statBits.length > 0 && (
+            <div style={hero.statLine}>{statBits.join('  ·  ')}</div>
           )}
-
-          <div style={{ textAlign: 'center', marginTop: '24px' }}>
-            <a href="/map" style={{
-              display: 'inline-flex', alignItems: 'center', gap: '8px',
-              padding: '12px 28px', background: '#1a1a2e', color: '#fff',
-              fontFamily: "'Outfit', sans-serif", fontWeight: 600, fontSize: '15px',
-              borderRadius: '10px', textDecoration: 'none',
-            }}>Open Full-Screen Map →</a>
-            <div style={{ marginTop: '12px', fontSize: '13px', color: '#999', fontFamily: "'Outfit', sans-serif" }}>
-              The full map layers in scenic routes, regions, and the stories that tie places together — and can now find places near you.
-            </div>
-          </div>
         </div>
       </section>
 
-      {/* ===== CATEGORY TILES ===== */}
-      <section style={{ padding: '64px 28px', background: '#f8f7f4' }}>
-        <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
-          <h2 style={{
-            fontFamily: "'Fraunces', serif",
-            fontSize: 'clamp(24px, 4vw, 32px)',
-            fontWeight: 800,
-            color: '#1a1a2e',
-            textAlign: 'center',
-            marginBottom: '36px',
-          }}>Explore by Category</h2>
+      {/* ===== STATE CHOOSER ===== */}
+      <section id="states" style={chooser.section}>
+        <div style={chooser.head}>
+          <h2 style={chooser.heading}>Where are you headed?</h2>
+          <p style={chooser.sub}>
+            Each state is its own guide — its regions, its drives, its stories, mapped end to end.
+          </p>
+        </div>
 
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-            gap: '16px',
-          }}>
-            {categories.map((cat) => {
-              const count = pois.filter(p => p.category === cat).length;
-              const color = getCategoryColor(cat);
-              const emoji = getCategoryEmoji(cat);
-              const label = cat.charAt(0).toUpperCase() + cat.slice(1);
-              return (
-                <a
-                  key={cat}
-                  href={`/explore`}
-                  style={{
-                    display: 'flex', flexDirection: 'column', gap: '8px',
-                    padding: '24px 20px', background: '#fff', borderRadius: '14px',
-                    textDecoration: 'none', border: '1.5px solid #e8e6e1',
-                    transition: 'border-color 0.15s ease, transform 0.15s ease',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <div style={{
-                    width: '40px', height: '40px', borderRadius: '10px',
-                    background: `${color}18`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '20px',
-                  }}>{emoji}</div>
-                  <div style={{
-                    fontFamily: "'Fraunces', serif",
-                    fontSize: '16px', fontWeight: 700, color: '#1a1a2e',
-                  }}>{label}</div>
-                  <div style={{ fontSize: '13px', color: '#999', fontWeight: 500 }}>
-                    {count} {count === 1 ? 'place' : 'places'}
-                  </div>
-                </a>
-              );
-            })}
-          </div>
+        <div style={chooser.grid}>
+          {states.map((s) => (
+            <StateCard key={s.id} state={s} />
+          ))}
         </div>
       </section>
 
-      {/* ===== FEATURED POIS ===== */}
-      {featured.length > 0 && (
-        <section style={{ padding: '64px 28px', background: '#fff' }}>
-          <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
-            <h2 style={{
-              fontFamily: "'Fraunces', serif",
-              fontSize: 'clamp(24px, 4vw, 32px)',
-              fontWeight: 800, color: '#1a1a2e',
-              textAlign: 'center', marginBottom: '12px',
-            }}>Don't-Miss Stops</h2>
-            <p style={{
-              fontSize: '15px', color: '#888', textAlign: 'center', marginBottom: '36px',
-            }}>Handpicked highlights from across Utah.</p>
-
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-              gap: '20px',
-            }}>
-              {featured.map((poi) => {
-                const color = getCategoryColor(poi.category);
-                const label = poi.category
-                  ? poi.category.charAt(0).toUpperCase() + poi.category.slice(1)
-                  : 'Place';
-                
-                 const poiSlug = poi.slug || toSlug(poi.name);
-                  return(
-                    <a key={poi.id} href={`/poi/${poiSlug}`} style={{
-                      background: '#faf9f7', borderRadius: '14px', padding: '24px',
-                      border: '1.5px solid #e8e6e1',
-                      display: 'flex', flexDirection: 'column', gap: '8px',
-                    textDecoration: 'none', color: 'inherit',
-                    }}><div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{
-                        width: '10px', height: '10px', borderRadius: '50%', background: color,
-                      }} />
-                      <span style={{
-                        fontSize: '11px', fontWeight: 600, color: color,
-                        textTransform: 'uppercase', letterSpacing: '0.5px',
-                      }}>{label}</span>
-                    </div>
-                    <div style={{
-                      fontFamily: "'Fraunces', serif",
-                      fontSize: '18px', fontWeight: 700, color: '#1a1a2e', lineHeight: 1.3,
-                    }}>{poi.name}</div>
-                    <div style={{ fontSize: '14px', color: '#666', lineHeight: 1.5 }}>
-                      {poi.tagline}
-                    </div>
-                    {poi.fun_fact && (
-                      <div style={{
-                        fontSize: '13px', color: '#888', fontStyle: 'italic',
-                        marginTop: '4px', lineHeight: 1.4,
-                      }}>💡 {poi.fun_fact}</div>
-                    )}
-                    <div style={{
-                      display: 'flex', gap: '12px', marginTop: '8px',
-                      fontSize: '12px', color: '#aaa',
-                    }}>
-                      {poi.visit_duration && <span>⏱ {poi.visit_duration}</span>}
-                      {poi.admission && <span>🎟 {poi.admission}</span>}
-                    </div>
-                  </a>
-                );
-              })}
+      {/* ===== NATIONAL MAP ===== */}
+      {pois.length > 0 && (
+        <section style={mapBlock.section}>
+          <div style={mapBlock.head}>
+            <h2 style={mapBlock.heading}>Or just browse the whole map</h2>
+            <p style={mapBlock.sub}>Every stop we&apos;ve mapped so far. Tap any dot to see what makes it worth pulling over.</p>
+          </div>
+          {categories.length > 0 && (
+            <div style={mapBlock.legendWrap}>
+              <MapLegend categories={categories} />
             </div>
+          )}
+          <div style={mapBlock.mapWrap}>
+            <MapView pois={pois} height="540px" />
           </div>
         </section>
       )}
-
-      {/* ===== FOOTER ===== */}
-      <footer style={{
-        background: '#1a1a2e', padding: '40px 28px', textAlign: 'center',
-      }}>
-        <div style={{
-          fontFamily: "'Fraunces', serif", fontSize: '20px',
-          fontWeight: 800, color: '#ff6b5b', marginBottom: '8px',
-        }}>Open Road Guide</div>
-        <p style={{
-          fontSize: '13px', color: 'rgba(255,255,255,0.35)',
-          maxWidth: '400px', margin: '0 auto',
-        }}>Built with love for the open road. More states coming soon.</p>
-      </footer>
     </div>
   );
 }
+
+// ---- State card ----
+
+function StateCard({ state }) {
+  const comingSoon = state.status !== 'live';
+
+  const inner = (
+    <>
+      <div style={card.imageWrap}>
+        {state.hero_image_url ? (
+          <img
+            src={heroSrc(state.hero_image_url, 800)}
+            alt={state.name}
+            loading="lazy"
+            style={{ ...card.image, filter: comingSoon ? 'grayscale(0.7) brightness(0.8)' : 'none' }}
+          />
+        ) : (
+          <div style={{ ...card.image, background: 'linear-gradient(135deg,#1a1a2e,#0f3460)' }} />
+        )}
+        <div style={card.imageScrim} />
+        <div style={card.stateName}>{state.name}</div>
+        {comingSoon && <div style={card.soonBadge}>Coming soon</div>}
+      </div>
+      <div style={card.body}>
+        {state.tagline && <p style={card.tagline}>{state.tagline}</p>}
+        {!comingSoon && <div style={card.cta}>Explore {state.name} →</div>}
+      </div>
+    </>
+  );
+
+  if (comingSoon) {
+    return <div style={{ ...card.card, cursor: 'default', opacity: 0.85 }}>{inner}</div>;
+  }
+  return (
+    <Link href={`/${state.slug}`} style={card.card}>
+      {inner}
+    </Link>
+  );
+}
+
+// ---- Styles ----
+
+const hero = {
+  section: {
+    position: 'relative',
+    background: 'linear-gradient(145deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+    minHeight: '72vh',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  roadLines: {
+    position: 'absolute', inset: 0, opacity: 0.06, pointerEvents: 'none',
+    background: 'repeating-linear-gradient(90deg, transparent, transparent 48%, #ffb627 48%, #ffb627 52%, transparent 52%)',
+  },
+  orb: {
+    position: 'absolute', width: '400px', height: '400px', borderRadius: '50%',
+    background: 'radial-gradient(circle, rgba(255,107,91,0.15) 0%, transparent 70%)',
+    top: '-100px', right: '-50px', pointerEvents: 'none',
+  },
+  inner: { position: 'relative', zIndex: 2, maxWidth: '900px', margin: '0 auto', padding: '64px 28px 72px', textAlign: 'center' },
+  badge: {
+    display: 'inline-flex', alignItems: 'center', gap: '8px',
+    background: 'rgba(255,182,39,0.15)', border: '1px solid rgba(255,182,39,0.3)',
+    borderRadius: '20px', padding: '6px 16px', marginBottom: '28px',
+  },
+  badgeText: { fontSize: '13px', fontWeight: 600, color: '#ffb627', textTransform: 'uppercase', letterSpacing: '1px' },
+  title: {
+    fontFamily: "'Fraunces', serif", fontSize: 'clamp(36px, 6vw, 64px)', fontWeight: 900,
+    color: '#fff', lineHeight: 1.1, marginBottom: '20px',
+  },
+  titleAccent: { background: 'linear-gradient(135deg, #ff6b5b, #ffb627)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
+  sub: { fontSize: 'clamp(16px, 2.5vw, 20px)', color: 'rgba(255,255,255,0.65)', lineHeight: 1.6, maxWidth: '620px', margin: '0 auto 36px' },
+  ctaRow: { display: 'flex', justifyContent: 'center', gap: '14px', flexWrap: 'wrap' },
+  ctaPrimary: {
+    display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '14px 32px',
+    background: 'linear-gradient(135deg, #ff6b5b, #ff8a7d)', color: '#fff',
+    fontWeight: 700, fontSize: '16px', borderRadius: '12px', textDecoration: 'none',
+    boxShadow: '0 4px 20px rgba(255,107,91,0.4)',
+  },
+  ctaGhost: {
+    display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '14px 32px',
+    background: 'rgba(255,255,255,0.08)', border: '1.5px solid rgba(255,255,255,0.2)',
+    color: '#fff', fontWeight: 600, fontSize: '16px', borderRadius: '12px', textDecoration: 'none',
+  },
+  statLine: { marginTop: '40px', fontSize: '13px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 500 },
+};
+
+const chooser = {
+  section: { padding: 'clamp(3rem, 7vw, 5rem) 28px', background: COLORS.paper, maxWidth: '1100px', margin: '0 auto' },
+  head: { textAlign: 'center', maxWidth: '40rem', margin: '0 auto 2.5rem' },
+  heading: { fontFamily: "'Fraunces', serif", fontSize: 'clamp(28px, 5vw, 42px)', fontWeight: 700, margin: '0 0 0.5rem 0', color: COLORS.ink },
+  sub: { fontSize: '1.05rem', color: COLORS.warmGray, lineHeight: 1.55, margin: 0 },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: '1.75rem' },
+};
+
+const card = {
+  card: {
+    display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: '18px',
+    overflow: 'hidden', textDecoration: 'none', color: 'inherit',
+    border: '1px solid #ececec', boxShadow: '0 6px 24px rgba(26,26,46,0.08)',
+    transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+  },
+  imageWrap: { position: 'relative', width: '100%', aspectRatio: '16 / 10', overflow: 'hidden', background: '#1a1a2e' },
+  image: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
+  imageScrim: { position: 'absolute', inset: 0, background: 'linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.55) 100%)' },
+  stateName: {
+    position: 'absolute', left: '20px', bottom: '14px', color: '#fff',
+    fontFamily: "'Fraunces', serif", fontWeight: 800, fontSize: 'clamp(28px, 4vw, 38px)',
+    textShadow: '0 2px 12px rgba(0,0,0,0.5)', letterSpacing: '-0.01em',
+  },
+  soonBadge: {
+    position: 'absolute', top: '14px', right: '14px', background: 'rgba(255,255,255,0.92)',
+    color: COLORS.ink, fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase',
+    letterSpacing: '0.08em', padding: '0.3rem 0.7rem', borderRadius: '999px',
+  },
+  body: { display: 'flex', flexDirection: 'column', padding: 'clamp(1.25rem, 3vw, 1.6rem)', flexGrow: 1 },
+  tagline: { fontSize: '1rem', lineHeight: 1.55, color: '#3a3a4e', margin: '0 0 1rem 0', fontStyle: 'italic', fontFamily: "'Fraunces', Georgia, serif", flexGrow: 1 },
+  cta: { fontSize: '0.95rem', fontWeight: 700, color: COLORS.coral, letterSpacing: '0.01em', marginTop: 'auto' },
+};
+
+const mapBlock = {
+  section: { padding: 'clamp(3rem, 6vw, 4.5rem) 28px', background: '#fff' },
+  head: { textAlign: 'center', maxWidth: '40rem', margin: '0 auto 1.5rem' },
+  heading: { fontFamily: "'Fraunces', serif", fontSize: 'clamp(24px, 4vw, 34px)', fontWeight: 700, margin: '0 0 0.4rem 0', color: COLORS.ink },
+  sub: { fontSize: '1rem', color: COLORS.warmGray, margin: 0, lineHeight: 1.5 },
+  legendWrap: { display: 'flex', justifyContent: 'center', marginBottom: '1rem' },
+  mapWrap: { maxWidth: '1100px', margin: '0 auto' },
+};
