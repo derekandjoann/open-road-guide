@@ -30,6 +30,11 @@ const REGION_COLORS = [
 
 export default function RegionsIndexPage() {
   const [regions, setRegions] = useState([]);
+  // States that actually have published regions, in states-table sort order:
+  // [{ slug, name }]. Drives the filter chips; self-maintaining as states grow.
+  const [stateOptions, setStateOptions] = useState([]);
+  // null = "All". Otherwise the canonical state name (e.g. "Nevada").
+  const [activeState, setActiveState] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -37,26 +42,52 @@ export default function RegionsIndexPage() {
       setLoading(true);
       // Pull each region's linked POI coordinates so the map can build a
       // footprint. The array length doubles as the place count on each card.
-      const { data } = await supabase
-        .from('regions')
-        .select('*, region_pois(pois(longitude, latitude))')
-        .eq('published', true)
-        .order('name', { ascending: true });
+      // Fetch the states roster in parallel so the filter chips speak the same
+      // slug/order language as the hub, nav, and sitemap (single source truth).
+      const [{ data: regionData }, { data: stateData }] = await Promise.all([
+        supabase
+          .from('regions')
+          .select('*, region_pois(pois(longitude, latitude))')
+          .eq('published', true)
+          .order('name', { ascending: true }),
+        supabase
+          .from('states')
+          .select('slug, name')
+          .eq('published', true)
+          .order('sort_order', { ascending: true }),
+      ]);
 
       // Assign each region its color by name-sorted index, so the map piece
-      // and the card always agree.
-      const withColor = (data || []).map((r, i) => ({
+      // and the card always agree. Done over the FULL set before any filtering,
+      // so a region's color never shifts when a state lens is applied.
+      const withColor = (regionData || []).map((r, i) => ({
         ...r,
         _color: REGION_COLORS[i % REGION_COLORS.length],
       }));
 
+      // Only offer a chip for a state that has at least one published region —
+      // no point filtering to an empty grid.
+      const present = new Set(withColor.map((r) => r.state).filter(Boolean));
+      const options = (stateData || []).filter((s) => present.has(s.name));
+
       setRegions(withColor);
+      setStateOptions(options);
+
+      // Honour an incoming ?state=<slug> deep-link (from a hub's "see all"
+      // path). Read from the URL directly — the page is fully client-rendered,
+      // so this avoids the useSearchParams Suspense requirement entirely.
+      const params = new URLSearchParams(window.location.search);
+      const wanted = (params.get('state') || '').toLowerCase();
+      const match = options.find((s) => s.slug === wanted);
+      setActiveState(match ? match.name : null);
+
       setLoading(false);
     }
     load();
   }, []);
 
-  // SEO meta tags
+  // SEO meta tags. Canonical stays on bare /regions regardless of the active
+  // lens — the ?state= param is a filter, not a distinct indexable page.
   useEffect(() => {
     const title = 'Regions | Open Road Guide';
     const desc =
@@ -89,9 +120,27 @@ export default function RegionsIndexPage() {
     canonical.setAttribute('href', 'https://openroadguide.com/regions');
   }, []);
 
+  // Apply a state lens. Writes the choice to the URL (shallow, no reload) so the
+  // filtered view is shareable and hub deep-links round-trip cleanly.
+  function applyState(option) {
+    const name = option ? option.name : null;
+    setActiveState(name);
+
+    const url = new URL(window.location.href);
+    if (option) url.searchParams.set('state', option.slug);
+    else url.searchParams.delete('state');
+    window.history.replaceState({}, '', url);
+  }
+
+  // The visible set after the lens. Map + cards both read from this; colors are
+  // already baked in above, so filtering never re-hues a region.
+  const visibleRegions = activeState
+    ? regions.filter((r) => r.state === activeState)
+    : regions;
+
   // Map data: each region's POI coordinates become a colored footprint.
   // Needs at least three geocoded points to form an area.
-  const regionMapData = regions
+  const regionMapData = visibleRegions
     .map((region) => ({
       slug: region.slug,
       name: region.name,
@@ -129,7 +178,26 @@ export default function RegionsIndexPage() {
         </p>
       </header>
 
-      {/* Explorable map of every region */}
+      {/* State lens — only shown once more than one state has regions */}
+      {!loading && stateOptions.length > 1 && (
+        <div style={styles.filterRow} role="group" aria-label="Filter regions by state">
+          <FilterChip
+            label="All"
+            active={activeState === null}
+            onClick={() => applyState(null)}
+          />
+          {stateOptions.map((s) => (
+            <FilterChip
+              key={s.slug}
+              label={s.name}
+              active={activeState === s.name}
+              onClick={() => applyState(s)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Explorable map of every region (in the current lens) */}
       {!loading && regionMapData.length > 0 && (
         <section style={styles.mapSection}>
           <CategoryMap mode="regions" regions={regionMapData} />
@@ -142,11 +210,15 @@ export default function RegionsIndexPage() {
       {/* Region cards */}
       {loading ? (
         <div style={styles.loading}>Loading regions…</div>
-      ) : regions.length === 0 ? (
-        <div style={styles.loading}>Regions are on the way.</div>
+      ) : visibleRegions.length === 0 ? (
+        <div style={styles.loading}>
+          {activeState
+            ? `No published regions in ${activeState} yet.`
+            : 'Regions are on the way.'}
+        </div>
       ) : (
         <section style={styles.cardsGrid}>
-          {regions.map((region) => (
+          {visibleRegions.map((region) => (
             <RegionCard key={region.id} region={region} color={region._color} />
           ))}
         </section>
@@ -156,6 +228,22 @@ export default function RegionsIndexPage() {
 }
 
 // ---- Sub-components ----
+
+function FilterChip({ label, active, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      style={{
+        ...styles.chip,
+        ...(active ? styles.chipActive : styles.chipIdle),
+      }}
+    >
+      {label}
+    </button>
+  );
+}
 
 function RegionCard({ region, color }) {
   const c = color || COLORS.violet;
@@ -248,6 +336,36 @@ const styles = {
     margin: 0,
     fontStyle: 'italic',
     fontFamily: "'Fraunces', Georgia, serif",
+  },
+
+  // State lens filter
+  filterRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '0.6rem',
+    marginBottom: '2rem',
+    alignItems: 'center',
+  },
+  chip: {
+    fontFamily: "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif",
+    fontSize: '0.9rem',
+    fontWeight: 600,
+    letterSpacing: '0.02em',
+    padding: '0.5rem 1.1rem',
+    borderRadius: '999px',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    lineHeight: 1.2,
+  },
+  chipIdle: {
+    background: '#fff',
+    color: COLORS.warmGray,
+    border: '1.5px solid #e2e2e2',
+  },
+  chipActive: {
+    background: COLORS.ink,
+    color: '#fff',
+    border: `1.5px solid ${COLORS.ink}`,
   },
 
   // Map
