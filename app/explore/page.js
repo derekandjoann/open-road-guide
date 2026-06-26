@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
@@ -46,8 +46,12 @@ export default function ExplorePage() {
   const pathname = usePathname();
   const [pois, setPois] = useState([]);
   const [filteredPois, setFilteredPois] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [activeCategory, setActiveCategory] = useState('All');
+  // State lens. null = "All states". activeState holds the canonical state name
+  // (e.g. "Nevada"); stateOptions is the chip roster [{slug,name}] in
+  // states-table order, intersected with the states that actually have POIs.
+  const [activeState, setActiveState] = useState(null);
+  const [stateOptions, setStateOptions] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   // Ranked results from the search_pois() full-text RPC. null = RPC inactive
   // (query empty/too short, still in flight, or errored) — in that case the
@@ -94,25 +98,41 @@ export default function ExplorePage() {
     return () => ro.disconnect();
   }, [isMobile]);
 
-  // Fetch POIs
+  // Fetch POIs + the states roster (in parallel). The states table gives the
+  // lens chips their slug/order language — the same one the hub, nav, sitemap,
+  // and the /regions · /stories · /routes listings all speak.
   useEffect(() => {
-    async function fetchPois() {
-      const { data, error } = await supabase
-        .from('pois')
-        .select('*')
-        .order('name');
+    async function fetchData() {
+      const [poiRes, stateRes] = await Promise.all([
+        supabase.from('pois').select('*').order('name'),
+        supabase
+          .from('states')
+          .select('slug, name')
+          .eq('published', true)
+          .order('sort_order', { ascending: true }),
+      ]);
 
+      const { data, error } = poiRes;
       if (error) {
         console.error('Error fetching POIs:', error);
       } else {
         setPois(data);
         setFilteredPois(data);
-        const cats = [...new Set(data.map(p => p.category).filter(Boolean))].sort();
-        setCategories(cats);
+
+        // Offer a state chip only where POIs actually exist.
+        const present = new Set((data || []).map(p => p.state).filter(Boolean));
+        const options = (stateRes.data || []).filter(s => present.has(s.name));
+        setStateOptions(options);
+
+        // Honour an incoming ?state=<slug> deep-link (e.g. a hub's "see {state}
+        // on the big map" path). Read straight from the URL.
+        const wanted = (new URLSearchParams(window.location.search).get('state') || '').toLowerCase();
+        const match = options.find(s => s.slug === wanted);
+        if (match) setActiveState(match.name);
       }
       setLoading(false);
     }
-    fetchPois();
+    fetchData();
   }, []);
 
   // Full-text search via the search_pois() RPC — debounced, race-safe.
@@ -163,11 +183,14 @@ export default function ExplorePage() {
         );
       }
     }
+    if (activeState !== null) {
+      result = result.filter(p => p.state === activeState);
+    }
     if (activeCategory !== 'All') {
       result = result.filter(p => p.category === activeCategory);
     }
     setFilteredPois(result);
-  }, [activeCategory, searchQuery, searchResults, pois]);
+  }, [activeCategory, activeState, searchQuery, searchResults, pois]);
 
   // Scroll to selected POI. On mobile the map is a sticky pane pinned to the
   // top of the page, so a tapped card must align to 'start' (its scroll-margin
@@ -179,6 +202,37 @@ export default function ExplorePage() {
       if (el) el.scrollIntoView({ behavior: 'smooth', block: isMobile ? 'start' : 'center' });
     }
   }, [selectedPoi, isMobile]);
+
+  // The state-scoped base set drives the category chip roster AND its counts,
+  // so the categories (and their numbers) always reflect the chosen state
+  // rather than the all-states totals.
+  const scopedPois = useMemo(
+    () => (activeState ? pois.filter(p => p.state === activeState) : pois),
+    [pois, activeState]
+  );
+  const categories = useMemo(
+    () => [...new Set(scopedPois.map(p => p.category).filter(Boolean))].sort(),
+    [scopedPois]
+  );
+
+  // Apply a state lens. Resets a category that no longer exists under the new
+  // state, and writes ?state to the URL (shallow, no reload) so the view is
+  // shareable and hub deep-links round-trip cleanly.
+  function applyState(option) {
+    const name = option ? option.name : null;
+    setActiveState(name);
+
+    const base = name ? pois.filter(p => p.state === name) : pois;
+    const cats = new Set(base.map(p => p.category).filter(Boolean));
+    if (activeCategory !== 'All' && !cats.has(activeCategory)) {
+      setActiveCategory('All');
+    }
+
+    const url = new URL(window.location.href);
+    if (option) url.searchParams.set('state', option.slug);
+    else url.searchParams.delete('state');
+    window.history.replaceState({}, '', url);
+  }
 
   return (
     <div style={{
@@ -280,7 +334,7 @@ export default function ExplorePage() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '4px',
-                background: activeCategory !== 'All' ? '#ff6b5b' : 'rgba(255,255,255,0.1)',
+                background: (activeCategory !== 'All' || activeState !== null) ? '#ff6b5b' : 'rgba(255,255,255,0.1)',
               }}
             >
               {[0, 1, 2].map(i => (
@@ -289,7 +343,7 @@ export default function ExplorePage() {
                   height: '2px',
                   borderRadius: '2px',
                   background: '#fff',
-                  opacity: activeCategory !== 'All' ? 1 : 0.85,
+                  opacity: (activeCategory !== 'All' || activeState !== null) ? 1 : 0.85,
                 }} />
               ))}
             </button>
@@ -321,6 +375,33 @@ export default function ExplorePage() {
                   boxShadow: '0 14px 36px rgba(0,0,0,0.28)',
                   zIndex: 2,
                 }}>
+                  {stateOptions.length > 1 && (
+                    <>
+                      <div style={{
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        letterSpacing: '1px',
+                        textTransform: 'uppercase',
+                        color: '#999',
+                        marginBottom: '11px',
+                      }}>Filter by state</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '18px' }}>
+                        <StateChip
+                          label="All"
+                          active={activeState === null}
+                          onClick={() => applyState(null)}
+                        />
+                        {stateOptions.map(s => (
+                          <StateChip
+                            key={s.slug}
+                            label={s.name}
+                            active={activeState === s.name}
+                            onClick={() => applyState(s)}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  )}
                   <div style={{
                     fontSize: '11px',
                     fontWeight: 700,
@@ -332,7 +413,7 @@ export default function ExplorePage() {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                     <FilterChip
                       label="All"
-                      count={pois.length}
+                      count={scopedPois.length}
                       active={activeCategory === 'All'}
                       color="#1a1a2e"
                       onClick={() => { setActiveCategory('All'); setFiltersOpen(false); }}
@@ -344,7 +425,7 @@ export default function ExplorePage() {
                         <FilterChip
                           key={cat}
                           label={label}
-                          count={pois.filter(p => p.category === cat).length}
+                          count={scopedPois.filter(p => p.category === cat).length}
                           active={activeCategory === cat}
                           color={color}
                           onClick={() => { setActiveCategory(cat); setFiltersOpen(false); }}
@@ -429,10 +510,35 @@ export default function ExplorePage() {
         display: 'flex',
         gap: '8px',
         whiteSpace: 'nowrap',
+        alignItems: 'center',
       }}>
+        {stateOptions.length > 1 && (
+          <>
+            <StateChip
+              label="All"
+              active={activeState === null}
+              onClick={() => applyState(null)}
+            />
+            {stateOptions.map(s => (
+              <StateChip
+                key={s.slug}
+                label={s.name}
+                active={activeState === s.name}
+                onClick={() => applyState(s)}
+              />
+            ))}
+            <div style={{
+              width: '1px',
+              alignSelf: 'stretch',
+              background: '#e2e0db',
+              margin: '2px 8px',
+              flexShrink: 0,
+            }} />
+          </>
+        )}
         <FilterChip
           label="All"
-          count={pois.length}
+          count={scopedPois.length}
           active={activeCategory === 'All'}
           color="#1a1a2e"
           onClick={() => setActiveCategory('All')}
@@ -444,7 +550,7 @@ export default function ExplorePage() {
             <FilterChip
               key={cat}
               label={label}
-              count={pois.filter(p => p.category === cat).length}
+              count={scopedPois.filter(p => p.category === cat).length}
               active={activeCategory === cat}
               color={color}
               onClick={() => setActiveCategory(cat)}
@@ -515,6 +621,7 @@ export default function ExplorePage() {
             zIndex: 5,
           }}>
             {filteredPois.length} {filteredPois.length === 1 ? 'place' : 'places'}
+            {activeState ? ` · ${activeState}` : ''}
             {activeCategory !== 'All' ? ` · ${activeCategory.charAt(0).toUpperCase() + activeCategory.slice(1)}` : ''}
           </div>
         </div>
@@ -597,6 +704,34 @@ function FilterChip({ label, count, active, color, onClick }) {
       )}
       {label}
       <span style={{ fontSize: '11px', fontWeight: 600, opacity: 0.6 }}>{count}</span>
+    </button>
+  );
+}
+
+/* State Lens Chip — filled-ink pill, no color dot, so it reads as a different
+   (coarser) control than the dotted category chips it sits beside. */
+function StateChip({ label, active, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      style={{
+        padding: '7px 14px',
+        borderRadius: '20px',
+        border: active ? '2px solid #1a1a2e' : '2px solid transparent',
+        background: active ? '#1a1a2e' : '#f5f4f1',
+        color: active ? '#fff' : '#666',
+        cursor: 'pointer',
+        fontFamily: "'Outfit', sans-serif",
+        fontSize: '13px',
+        fontWeight: active ? 700 : 500,
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+        transition: 'all 0.15s ease',
+      }}
+    >
+      {label}
     </button>
   );
 }
