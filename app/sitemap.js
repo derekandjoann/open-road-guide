@@ -31,12 +31,22 @@ export default async function sitemap() {
     { url: `${BASE}/privacy`, lastModified: now, changeFrequency: 'yearly', priority: 0.3 },
   ];
 
-  const [pois, stories, routes, regions] = await Promise.all([
+  const [pois, stories, routes, regions, states] = await Promise.all([
     fetchRows('pois'),
     fetchRows('stories'),
     fetchRows('routes'),
     fetchRows('regions'),
+    fetchRows('states'),
   ]);
+
+  // State hubs live at the top level (/utah, /nevada). High priority — they're
+  // the front door for each state.
+  const stateHubs = states.map((row) => ({
+    url: `${BASE}/${row.slug}`,
+    lastModified: row.updated_at ? new Date(row.updated_at) : now,
+    changeFrequency: 'weekly',
+    priority: 0.9,
+  }));
 
   const toEntry = (prefix, priority, changeFrequency) => (row) => ({
     url: `${BASE}/${prefix}/${row.slug}`,
@@ -47,6 +57,7 @@ export default async function sitemap() {
 
   return [
     ...staticPages,
+    ...stateHubs,
     ...pois.map(toEntry('poi', 0.7, 'monthly')),
     ...routes.map(toEntry('route', 0.7, 'monthly')),
     ...regions.map(toEntry('region', 0.7, 'monthly')),
