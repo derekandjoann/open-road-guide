@@ -23,6 +23,11 @@ const COLORS = {
 
 export default function StoriesIndexPage() {
   const [stories, setStories] = useState([]);
+  // States that actually have published stories, in states-table sort order:
+  // [{ slug, name }]. Drives the filter chips; self-maintaining as states grow.
+  const [stateOptions, setStateOptions] = useState([]);
+  // null = "All". Otherwise the canonical state name (e.g. "Nevada").
+  const [activeState, setActiveState] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -30,20 +35,46 @@ export default function StoriesIndexPage() {
       setLoading(true);
       // Newest first by published_at, falling back to created_at.
       // Linked POI coordinates ride along so the map can place a pin.
-      const { data } = await supabase
-        .from('stories')
-        .select('*, story_pois(pois(longitude, latitude))')
-        .eq('published', true)
-        .order('published_at', { ascending: false, nullsFirst: false })
-        .order('created_at', { ascending: false });
+      // States roster fetched in parallel so the chips speak the same
+      // slug/order language as the hub, nav, and sitemap.
+      const [{ data: storyData }, { data: stateData }] = await Promise.all([
+        supabase
+          .from('stories')
+          .select('*, story_pois(pois(longitude, latitude))')
+          .eq('published', true)
+          .order('published_at', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('states')
+          .select('slug, name')
+          .eq('published', true)
+          .order('sort_order', { ascending: true }),
+      ]);
 
-      setStories(data || []);
+      const rows = storyData || [];
+
+      // Only offer a chip for a state that has at least one published story.
+      const present = new Set(rows.map((s) => s.state).filter(Boolean));
+      const options = (stateData || []).filter((s) => present.has(s.name));
+
+      setStories(rows);
+      setStateOptions(options);
+
+      // Honour an incoming ?state=<slug> deep-link from a hub's "read more"
+      // path. Read straight from the URL — the page is fully client-rendered,
+      // so this sidesteps the useSearchParams Suspense requirement.
+      const params = new URLSearchParams(window.location.search);
+      const wanted = (params.get('state') || '').toLowerCase();
+      const match = options.find((s) => s.slug === wanted);
+      setActiveState(match ? match.name : null);
+
       setLoading(false);
     }
     load();
   }, []);
 
-  // SEO meta tags
+  // SEO meta tags. Canonical stays on bare /stories — ?state= is a filter,
+  // not a distinct indexable page.
   useEffect(() => {
     const title = 'Stories | Open Road Guide';
     const desc =
@@ -76,12 +107,28 @@ export default function StoriesIndexPage() {
     canonical.setAttribute('href', 'https://openroadguide.com/stories');
   }, []);
 
-  // Separate featured stories from the rest
-  const featured = stories.filter((s) => s.featured);
-  const regular = stories.filter((s) => !s.featured);
+  // Apply a state lens. Writes the choice to the URL (shallow, no reload) so the
+  // filtered view is shareable and hub deep-links round-trip cleanly.
+  function applyState(option) {
+    const name = option ? option.name : null;
+    setActiveState(name);
+
+    const url = new URL(window.location.href);
+    if (option) url.searchParams.set('state', option.slug);
+    else url.searchParams.delete('state');
+    window.history.replaceState({}, '', url);
+  }
+
+  // The visible set after the lens, then the featured/regular split rides on it.
+  const visibleStories = activeState
+    ? stories.filter((s) => s.state === activeState)
+    : stories;
+
+  const featured = visibleStories.filter((s) => s.featured);
+  const regular = visibleStories.filter((s) => !s.featured);
 
   // Map data: pin each story at the average position of its linked POIs.
-  const storyMapData = stories
+  const storyMapData = visibleStories
     .map((s) => {
       const pts = (s.story_pois || [])
         .map((sp) => sp.pois)
@@ -127,7 +174,26 @@ export default function StoriesIndexPage() {
         </p>
       </header>
 
-      {/* Explorable map of where each story takes place */}
+      {/* State lens — only shown once more than one state has stories */}
+      {!loading && stateOptions.length > 1 && (
+        <div style={styles.filterRow} role="group" aria-label="Filter stories by state">
+          <FilterChip
+            label="All"
+            active={activeState === null}
+            onClick={() => applyState(null)}
+          />
+          {stateOptions.map((s) => (
+            <FilterChip
+              key={s.slug}
+              label={s.name}
+              active={activeState === s.name}
+              onClick={() => applyState(s)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Explorable map of where each story takes place (in the current lens) */}
       {!loading && storyMapData.length > 0 && (
         <section style={styles.mapSection}>
           <CategoryMap mode="stories" stories={storyMapData} />
@@ -142,6 +208,8 @@ export default function StoriesIndexPage() {
         <div style={styles.loading}>Loading stories…</div>
       ) : stories.length === 0 ? (
         <EmptyState />
+      ) : visibleStories.length === 0 ? (
+        <div style={styles.loading}>No published stories in {activeState} yet.</div>
       ) : (
         <>
           {featured.length > 0 && (
@@ -195,6 +263,24 @@ function EmptyState() {
         </Link>
       </div>
     </section>
+  );
+}
+
+// ---- Filter chip ----
+
+function FilterChip({ label, active, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      style={{
+        ...styles.chip,
+        ...(active ? styles.chipActive : styles.chipIdle),
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -324,6 +410,36 @@ const styles = {
     margin: 0,
     fontStyle: 'italic',
     fontFamily: "'Fraunces', Georgia, serif",
+  },
+
+  // State lens filter
+  filterRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '0.6rem',
+    marginBottom: '2rem',
+    alignItems: 'center',
+  },
+  chip: {
+    fontFamily: "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif",
+    fontSize: '0.9rem',
+    fontWeight: 600,
+    letterSpacing: '0.02em',
+    padding: '0.5rem 1.1rem',
+    borderRadius: '999px',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    lineHeight: 1.2,
+  },
+  chipIdle: {
+    background: '#fff',
+    color: COLORS.warmGray,
+    border: '1.5px solid #e2e2e2',
+  },
+  chipActive: {
+    background: COLORS.ink,
+    color: '#fff',
+    border: `1.5px solid ${COLORS.ink}`,
   },
 
   // Map
