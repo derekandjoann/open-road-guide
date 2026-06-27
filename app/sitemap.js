@@ -27,6 +27,7 @@ export default async function sitemap() {
     { url: `${BASE}/routes`, lastModified: now, changeFrequency: 'weekly', priority: 0.8 },
     { url: `${BASE}/regions`, lastModified: now, changeFrequency: 'weekly', priority: 0.8 },
     { url: `${BASE}/stories`, lastModified: now, changeFrequency: 'weekly', priority: 0.8 },
+    { url: `${BASE}/markers`, lastModified: now, changeFrequency: 'weekly', priority: 0.8 },
     { url: `${BASE}/about`, lastModified: now, changeFrequency: 'monthly', priority: 0.5 },
     { url: `${BASE}/privacy`, lastModified: now, changeFrequency: 'yearly', priority: 0.3 },
   ];
