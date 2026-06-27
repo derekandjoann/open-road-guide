@@ -1,110 +1,50 @@
 'use client';
 
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
 import MapView from '../../components/MapView';
-import { getCategoryColor, getCategoryEmoji } from '../../lib/categoryColors';
-import { navLinks, isNavLinkActive } from '../../lib/navLinks';
-import { toSlug } from '../../lib/slug'; 
 
-// Serve a small, right-sized thumbnail from Supabase's image render endpoint
-// rather than the multi-megabyte original. Falls back to the original URL
-// untouched if it isn't in the expected public-object form.
-function thumbSrc(url, width = 160) {
-  if (!url) return '';
-  if (!url.includes('/storage/v1/object/public/')) return url;
-  const base = url.replace(
-    '/storage/v1/object/public/',
-    '/storage/v1/render/image/public/'
-  );
-  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
-}
-
-// Desktop consolidated-header tab styles. On /explore the section nav lives in
-// the dark bar (Nav.js returns null there at desktop width), so these mirror the
-// dark global nav's tab treatment: light inactive, coral active with underline.
-const navTabInactive = {
-  color: 'rgba(255,255,255,0.72)',
-  textDecoration: 'none',
-  fontSize: '15px',
-  fontWeight: 500,
-  paddingBottom: '4px',
-  borderBottom: '2px solid transparent',
-};
-const navTabActive = {
-  color: '#ff6b5b',
-  textDecoration: 'none',
-  fontSize: '15px',
-  fontWeight: 600,
-  paddingBottom: '4px',
-  borderBottom: '2px solid #ff6b5b',
+// Open Road Guide brand palette
+const COLORS = {
+  coral: '#FF6B6B',
+  teal: '#4ECDC4',
+  yellow: '#FFD93D',
+  violet: '#9D4EDD',
+  ink: '#1a1a2e',
+  paper: '#FFF8F0',
+  warmGray: '#666',
 };
 
-export default function ExplorePage() {
-  const pathname = usePathname();
-  const [pois, setPois] = useState([]);
-  const [filteredPois, setFilteredPois] = useState([]);
-  const [activeCategory, setActiveCategory] = useState('All');
-  // State lens. null = "All states". activeState holds the canonical state name
-  // (e.g. "Nevada"); stateOptions is the chip roster [{slug,name}] in
-  // states-table order, intersected with the states that actually have POIs.
-  const [activeState, setActiveState] = useState(null);
+const MARKER_VIOLET = '#9D4EDD';
+
+export default function MarkersIndexPage() {
+  // Light marker set (no description/inscription text — those load on demand).
+  const [markers, setMarkers] = useState([]);
+  // [{ slug, name }] in states-table order, intersected with states that have
+  // markers — drives the state lens, same slug language as the rest of the site.
   const [stateOptions, setStateOptions] = useState([]);
+  // null = "All states". Otherwise the canonical state name (e.g. "Nevada").
+  const [activeState, setActiveState] = useState(null);
+  // null = county index. Otherwise { state, county } — the open county view.
+  const [activeCounty, setActiveCounty] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
-  // Ranked results from the search_pois() full-text RPC. null = RPC inactive
-  // (query empty/too short, still in flight, or errored) — in that case the
-  // legacy substring filter below applies, so search never breaks.
-  const [searchResults, setSearchResults] = useState(null);
-  const [selectedPoi, setSelectedPoi] = useState(null);
   const [loading, setLoading] = useState(true);
-  // Mobile layout switch: stack map over list below 768px. matchMedia with a
-  // change listener keeps it correct through rotation; initial false avoids
-  // SSR/window access issues since this only renders meaningfully client-side.
-  const [isMobile, setIsMobile] = useState(false);
-  // Measured height of the sticky search+chips controls pane on mobile. Feeds
-  // the map's sticky `top` and the cards' scroll-margin so the map pins right
-  // below the controls and a tapped card clears the whole stack. 0 on desktop.
-  const [controlsH, setControlsH] = useState(0);
-  // Mobile category dropdown (the hamburger beside the search). Desktop keeps
-  // its always-on chip strip and never opens this.
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 768px)');
-    const update = () => setIsMobile(mq.matches);
-    update();
-    mq.addEventListener('change', update);
-    return () => mq.removeEventListener('change', update);
-  }, []);
-  const listRef = useRef(null);
-  const controlsRef = useRef(null);
-  // Track the controls pane's real rendered height. A ResizeObserver catches
-  // everything that can change it — rotation, the search field wrapping, late
-  // font load, the category chips arriving after fetch — and keeps the map's
-  // offset exact without hardcoding a height. Off (and zeroed) on desktop.
-  useEffect(() => {
-    if (!isMobile) {
-      setControlsH(0);
-      setFiltersOpen(false);
-      return;
-    }
-    const el = controlsRef.current;
-    if (!el) return;
-    const measure = () => setControlsH(el.offsetHeight);
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [isMobile]);
 
-  // Fetch POIs + the states roster (in parallel). The states table gives the
-  // lens chips their slug/order language — the same one the hub, nav, sitemap,
-  // and the /regions · /stories · /routes listings all speak.
+  // Read-more machinery. details caches the lazily-fetched long text by id;
+  // expanded tracks which cards are open; detailLoading guards in-flight fetches.
+  const [details, setDetails] = useState({});
+  const [expanded, setExpanded] = useState(() => new Set());
+  const [detailLoading, setDetailLoading] = useState(() => new Set());
+
   useEffect(() => {
-    async function fetchData() {
-      const [poiRes, stateRes] = await Promise.all([
-        supabase.from('pois').select('*').order('name'),
+    async function load() {
+      setLoading(true);
+      // One overlay call returns every marker tagged with its state, plus the
+      // lightweight has_description / has_inscription flags. The states roster
+      // gives the lens chips their slug/order.
+      const [overlayRes, stateRes] = await Promise.all([
+        supabase.rpc('markers_overlay'),
         supabase
           .from('states')
           .select('slug, name')
@@ -112,724 +52,663 @@ export default function ExplorePage() {
           .order('sort_order', { ascending: true }),
       ]);
 
-      const { data, error } = poiRes;
-      if (error) {
-        console.error('Error fetching POIs:', error);
-      } else {
-        setPois(data);
-        setFilteredPois(data);
+      const features = overlayRes?.data?.features || [];
+      const rows = features.map((f) => {
+        const [lng, lat] = f.geometry?.coordinates || [];
+        const p = f.properties || {};
+        return {
+          id: p.id,
+          name: p.name,
+          longitude: lng,
+          latitude: lat,
+          state: p.state,
+          county: p.county || 'Unknown',
+          city: p.city,
+          theme: p.theme,
+          commemorates: p.commemorates,
+          marker_type: p.marker_type,
+          year: p.year,
+          erected_by: p.erected_by,
+          note: p.note,
+          hmdb_url: p.hmdb_url,
+          has_description: !!p.has_description,
+          has_inscription: !!p.has_inscription,
+        };
+      });
 
-        // Offer a state chip only where POIs actually exist.
-        const present = new Set((data || []).map(p => p.state).filter(Boolean));
-        const options = (stateRes.data || []).filter(s => present.has(s.name));
-        setStateOptions(options);
+      const present = new Set(rows.map((m) => m.state).filter(Boolean));
+      const options = (stateRes.data || []).filter((s) => present.has(s.name));
 
-        // Honour an incoming ?state=<slug> deep-link (e.g. a hub's "see {state}
-        // on the big map" path). Read straight from the URL.
-        const wanted = (new URLSearchParams(window.location.search).get('state') || '').toLowerCase();
-        const match = options.find(s => s.slug === wanted);
-        if (match) setActiveState(match.name);
-      }
+      setMarkers(rows);
+      setStateOptions(options);
+
+      // Honour an incoming ?state=<slug> deep-link (from a hub or listing).
+      const wanted = (new URLSearchParams(window.location.search).get('state') || '').toLowerCase();
+      const match = options.find((s) => s.slug === wanted);
+      if (match) setActiveState(match.name);
+
       setLoading(false);
     }
-    fetchData();
+    load();
   }, []);
 
-  // Full-text search via the search_pois() RPC — debounced, race-safe.
-  // Matches words anywhere in a POI's name, tagline, or full description
-  // (with English stemming), ranked by relevance. Queries shorter than three
-  // characters skip the RPC; the substring filter handles those better.
+  // SEO meta tags. Canonical stays on bare /markers — ?state= is a filter.
   useEffect(() => {
-    const q = searchQuery.trim();
-    if (q.length < 3) {
-      setSearchResults(null);
-      return;
-    }
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      const { data, error } = await supabase.rpc('search_pois', {
-        search_query: q,
-        max_results: 100,
-      });
-      if (cancelled) return;
-      if (error) {
-        console.error('search_pois error:', error);
-        setSearchResults(null); // fall back to substring filtering
-      } else {
-        setSearchResults(data || []);
+    const title = 'Historical Markers | Open Road Guide';
+    const desc =
+      'Every roadside historical marker across the American West, browsable by state and county — the plaques and monuments where the region remembers itself.';
+    document.title = title;
+    const setMeta = (selector, attr, value) => {
+      let el = document.querySelector(selector);
+      if (!el) {
+        el = document.createElement('meta');
+        const m = selector.match(/\[(\w+)="([^"]+)"\]/);
+        if (m) el.setAttribute(m[1], m[2]);
+        document.head.appendChild(el);
       }
-    }, 250);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
+      el.setAttribute(attr, value);
     };
-  }, [searchQuery]);
-
-  // Filter
-  useEffect(() => {
-    let result = pois;
-    if (searchQuery.trim()) {
-      if (searchResults !== null) {
-        // Ranked full-text results: map RPC ids back to the fully loaded POI
-        // objects so cards and map markers keep every field, in rank order.
-        const byId = new Map(pois.map(p => [p.id, p]));
-        result = searchResults.map(r => byId.get(r.id)).filter(Boolean);
-      } else {
-        const q = searchQuery.toLowerCase();
-        result = result.filter(p =>
-          p.name.toLowerCase().includes(q) ||
-          (p.tagline && p.tagline.toLowerCase().includes(q)) ||
-          (p.category && p.category.toLowerCase().includes(q))
-        );
-      }
+    setMeta('meta[name="description"]', 'content', desc);
+    setMeta('meta[property="og:title"]', 'content', title);
+    setMeta('meta[property="og:description"]', 'content', desc);
+    setMeta('meta[property="og:type"]', 'content', 'website');
+    let canonical = document.querySelector('link[rel="canonical"]');
+    if (!canonical) {
+      canonical = document.createElement('link');
+      canonical.setAttribute('rel', 'canonical');
+      document.head.appendChild(canonical);
     }
-    if (activeState !== null) {
-      result = result.filter(p => p.state === activeState);
-    }
-    if (activeCategory !== 'All') {
-      result = result.filter(p => p.category === activeCategory);
-    }
-    setFilteredPois(result);
-  }, [activeCategory, activeState, searchQuery, searchResults, pois]);
+    canonical.setAttribute('href', 'https://openroadguide.com/markers');
+  }, []);
 
-  // Scroll to selected POI. On mobile the map is a sticky pane pinned to the
-  // top of the page, so a tapped card must align to 'start' (its scroll-margin
-  // clears the pinned map) rather than 'center', which would land it behind
-  // the map. On desktop the sidebar scrolls internally, so 'center' is right.
-  useEffect(() => {
-    if (selectedPoi && listRef.current) {
-      const el = listRef.current.querySelector(`[data-poi-id="${selectedPoi.id}"]`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: isMobile ? 'start' : 'center' });
-    }
-  }, [selectedPoi, isMobile]);
-
-  // The state-scoped base set drives the category chip roster AND its counts,
-  // so the categories (and their numbers) always reflect the chosen state
-  // rather than the all-states totals.
-  const scopedPois = useMemo(
-    () => (activeState ? pois.filter(p => p.state === activeState) : pois),
-    [pois, activeState]
-  );
-  const categories = useMemo(
-    () => [...new Set(scopedPois.map(p => p.category).filter(Boolean))].sort(),
-    [scopedPois]
-  );
-
-  // Apply a state lens. Resets a category that no longer exists under the new
-  // state, and writes ?state to the URL (shallow, no reload) so the view is
-  // shareable and hub deep-links round-trip cleanly.
+  // Apply a state lens. Resets the open county (counties are state-specific) and
+  // writes ?state to the URL so the view is shareable and deep-links round-trip.
   function applyState(option) {
     const name = option ? option.name : null;
     setActiveState(name);
-
-    const base = name ? pois.filter(p => p.state === name) : pois;
-    const cats = new Set(base.map(p => p.category).filter(Boolean));
-    if (activeCategory !== 'All' && !cats.has(activeCategory)) {
-      setActiveCategory('All');
-    }
-
+    setActiveCounty(null);
     const url = new URL(window.location.href);
     if (option) url.searchParams.set('state', option.slug);
     else url.searchParams.delete('state');
     window.history.replaceState({}, '', url);
   }
 
+  // Toggle a card's read-more, lazily fetching the long text the first time.
+  async function toggleExpand(id) {
+    if (expanded.has(id)) {
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      return;
+    }
+    if (!details[id] && !detailLoading.has(id)) {
+      setDetailLoading((prev) => new Set(prev).add(id));
+      const { data } = await supabase
+        .from('markers')
+        .select('description, inscription')
+        .eq('id', id)
+        .maybeSingle();
+      setDetails((prev) => ({
+        ...prev,
+        [id]: {
+          description: data?.description || '',
+          inscription: data?.inscription || '',
+        },
+      }));
+      setDetailLoading((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+    setExpanded((prev) => new Set(prev).add(id));
+  }
+
+  // Sort key for states, by states-table order (Utah before Nevada, etc.).
+  const stateOrder = useMemo(() => {
+    const m = new Map();
+    stateOptions.forEach((s, i) => m.set(s.name, i));
+    return m;
+  }, [stateOptions]);
+
+  const scopedMarkers = useMemo(
+    () => (activeState ? markers.filter((m) => m.state === activeState) : markers),
+    [markers, activeState]
+  );
+
+  // County index: one entry per (state, county), with a count.
+  const counties = useMemo(() => {
+    const map = new Map();
+    for (const m of scopedMarkers) {
+      const key = `${m.state}|${m.county}`;
+      if (!map.has(key)) map.set(key, { state: m.state, county: m.county, count: 0 });
+      map.get(key).count += 1;
+    }
+    return [...map.values()].sort((a, b) => {
+      const so = (stateOrder.get(a.state) ?? 99) - (stateOrder.get(b.state) ?? 99);
+      return so !== 0 ? so : a.county.localeCompare(b.county);
+    });
+  }, [scopedMarkers, stateOrder]);
+
+  const countyMarkers = useMemo(() => {
+    if (!activeCounty) return [];
+    return markers
+      .filter((m) => m.state === activeCounty.state && m.county === activeCounty.county)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [markers, activeCounty]);
+
+  // Map points for the county view — markers ride in as POIs so MapView frames
+  // and renders them; markerColor forces the violet historical-marker hue.
+  const countyMapPois = useMemo(
+    () =>
+      countyMarkers.map((m) => ({
+        id: m.id,
+        name: m.name,
+        longitude: m.longitude,
+        latitude: m.latitude,
+        category: m.theme,
+        tagline: m.note || m.commemorates || null,
+      })),
+    [countyMarkers]
+  );
+
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return null;
+    return scopedMarkers
+      .filter(
+        (m) =>
+          m.name.toLowerCase().includes(q) ||
+          (m.county && m.county.toLowerCase().includes(q)) ||
+          (m.theme && m.theme.toLowerCase().includes(q))
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [searchQuery, scopedMarkers]);
+
+  const showStateTag = activeState === null;
+
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: '#f8f7f4',
-      fontFamily: "'Outfit', sans-serif",
-    }}>
-      {/* Search + category controls. On mobile this whole block is sticky,
-          pinned under the global nav (top:94px) so the search field and the
-          filter chips stay on screen while the card list scrolls beneath the
-          map. Its measured height (controlsH) drives the map's sticky top and
-          the cards' scroll-margin below. On desktop the wrapper is static; the
-          consolidated header inside it pins itself (sticky top:0). */}
-      <div
-        ref={controlsRef}
-        style={{
-          position: isMobile ? 'sticky' : 'static',
-          top: isMobile ? '94px' : 'auto',
-          zIndex: isMobile ? 40 : 'auto',
-        }}
-      >
-      {/* Header. Mobile is unchanged — search + hamburger + the category
-          dropdown, the dark band the phone already ships. Desktop renders the
-          consolidated bar instead: on /explore the global nav steps aside
-          (Nav.js returns null at desktop width) and this single dark row carries
-          the wordmark, the section tabs, and the search. The old branding row
-          and the separate cream nav are both gone. */}
-      <header style={{
-        background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
-        padding: isMobile ? '12px 16px' : '15px 28px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: isMobile ? 'space-between' : 'flex-start',
-        flexWrap: 'nowrap',
-        gap: isMobile ? '10px' : '34px',
-        // Mobile: relative — anchors the dropdown; the sticky controls wrapper
-        // pins it under the cream nav. Desktop: this bar is the page's top
-        // chrome (no global nav on /explore), so it pins itself at the top.
-        position: isMobile ? 'relative' : 'sticky',
-        top: isMobile ? 'auto' : 0,
-        zIndex: isMobile ? 'auto' : 100,
-      }}>
-        {isMobile ? (
-          <>
-            <div style={{
-              position: 'relative',
-              flex: 1,
-              minWidth: 0,
-              maxWidth: '100%',
-              // Keep the field above the dropdown's tap-away backdrop so it
-              // stays focusable while the menu is open.
-              zIndex: 3,
-            }}>
-              <input
-                type="text"
-                placeholder="Search places, stories, geology..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '10px 14px 10px 36px',
-                  borderRadius: '10px',
-                  border: 'none',
-                  background: 'rgba(255,255,255,0.1)',
-                  color: '#fff',
-                  fontSize: '14px',
-                  fontFamily: "'Outfit', sans-serif",
-                  outline: 'none',
-                }}
-              />
-              <span style={{
-                position: 'absolute',
-                left: '12px',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                fontSize: '16px',
-                opacity: 0.5,
-              }}>🔍</span>
-            </div>
+    <main style={styles.main}>
+      {/* Breadcrumb */}
+      <nav style={styles.breadcrumb}>
+        <Link href="/" style={styles.crumbLink}>Home</Link>
+        <span style={styles.crumbSep}>›</span>
+        <span style={styles.crumbCurrent}>Historical Markers</span>
+      </nav>
 
-            {/* Hamburger. Tints coral when a filter other than "All" is active,
-                so a hidden filter is never forgotten. */}
-            <button
-              type="button"
-              onClick={() => setFiltersOpen(o => !o)}
-              aria-label="Filter by category"
-              aria-expanded={filtersOpen}
-              style={{
-                position: 'relative',
-                zIndex: 3,
-                flexShrink: 0,
-                width: '42px',
-                height: '42px',
-                borderRadius: '10px',
-                border: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '4px',
-                background: (activeCategory !== 'All' || activeState !== null) ? '#ff6b5b' : 'rgba(255,255,255,0.1)',
-              }}
-            >
-              {[0, 1, 2].map(i => (
-                <span key={i} style={{
-                  width: '18px',
-                  height: '2px',
-                  borderRadius: '2px',
-                  background: '#fff',
-                  opacity: (activeCategory !== 'All' || activeState !== null) ? 1 : 0.85,
-                }} />
-              ))}
-            </button>
-
-            {/* Category dropdown. A fixed backdrop closes it on an outside tap;
-                each chip filters and closes. It sits inside the sticky controls
-                wrapper (z-index 40), so it paints above the map (z-index 20).
-                Field and hamburger are at z-index 3 so they stay live above the
-                z-index-1 backdrop while the z-index-2 panel floats over the map. */}
-            {filtersOpen && (
-              <>
-                <div
-                  onClick={() => setFiltersOpen(false)}
-                  style={{
-                    position: 'fixed',
-                    inset: 0,
-                    background: 'rgba(0,0,0,0.04)',
-                    zIndex: 1,
-                  }}
-                />
-                <div style={{
-                  position: 'absolute',
-                  top: 'calc(100% + 8px)',
-                  left: '16px',
-                  right: '16px',
-                  background: '#fff',
-                  borderRadius: '14px',
-                  padding: '14px',
-                  boxShadow: '0 14px 36px rgba(0,0,0,0.28)',
-                  zIndex: 2,
-                }}>
-                  {stateOptions.length > 1 && (
-                    <>
-                      <div style={{
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        letterSpacing: '1px',
-                        textTransform: 'uppercase',
-                        color: '#999',
-                        marginBottom: '11px',
-                      }}>Filter by state</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '18px' }}>
-                        <StateChip
-                          label="All"
-                          active={activeState === null}
-                          onClick={() => applyState(null)}
-                        />
-                        {stateOptions.map(s => (
-                          <StateChip
-                            key={s.slug}
-                            label={s.name}
-                            active={activeState === s.name}
-                            onClick={() => applyState(s)}
-                          />
-                        ))}
-                      </div>
-                    </>
-                  )}
-                  <div style={{
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    letterSpacing: '1px',
-                    textTransform: 'uppercase',
-                    color: '#999',
-                    marginBottom: '11px',
-                  }}>Filter by category</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    <FilterChip
-                      label="All"
-                      count={scopedPois.length}
-                      active={activeCategory === 'All'}
-                      color="#1a1a2e"
-                      onClick={() => { setActiveCategory('All'); setFiltersOpen(false); }}
-                    />
-                    {categories.map(cat => {
-                      const color = getCategoryColor(cat);
-                      const label = cat.charAt(0).toUpperCase() + cat.slice(1);
-                      return (
-                        <FilterChip
-                          key={cat}
-                          label={label}
-                          count={scopedPois.filter(p => p.category === cat).length}
-                          active={activeCategory === cat}
-                          color={color}
-                          onClick={() => { setActiveCategory(cat); setFiltersOpen(false); }}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-              </>
-            )}
-          </>
-        ) : (
-          <>
-            {/* Wordmark — links home, like the old nav. */}
-            <Link href="/" style={{
-              fontFamily: "'Fraunces', serif",
-              fontSize: '21px',
-              fontWeight: 800,
-              color: '#ff6b5b',
-              textDecoration: 'none',
-              letterSpacing: '-0.01em',
-              flex: '0 0 auto',
-            }}>Open Road Guide</Link>
-
-            {/* Section tabs. Explore is the current page; the others link out and
-                match the dark nav the rest of the site now renders. */}
-            <nav style={{ display: 'flex', alignItems: 'center', gap: '28px', flex: '0 0 auto' }}>
-              {navLinks.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  style={isNavLinkActive(pathname, link.href) ? navTabActive : navTabInactive}
-                >
-                  {link.label}
-                </Link>
-              ))}
-            </nav>
-
-            {/* Spacer pushes the search to the right edge. */}
-            <div style={{ flex: 1 }} />
-
-            {/* Search — the same field as before, now in the single bar. */}
-            <div style={{ position: 'relative', width: '280px', maxWidth: '100%', flex: '0 0 auto' }}>
-              <input
-                type="text"
-                placeholder="Search places, stories, geology..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '10px 14px 10px 36px',
-                  borderRadius: '10px',
-                  border: 'none',
-                  background: 'rgba(255,255,255,0.1)',
-                  color: '#fff',
-                  fontSize: '14px',
-                  fontFamily: "'Outfit', sans-serif",
-                  outline: 'none',
-                }}
-              />
-              <span style={{
-                position: 'absolute',
-                left: '12px',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                fontSize: '16px',
-                opacity: 0.5,
-              }}>🔍</span>
-            </div>
-          </>
+      {/* Hero */}
+      <header style={styles.hero}>
+        <div style={styles.eyebrow}>Open Road Guide</div>
+        <h1 style={styles.title}>Historical Markers</h1>
+        <p style={styles.tagline}>
+          Roadside history, marker by marker — the plaques and monuments where the
+          West records what happened here, browsable by state and county.
+        </p>
+        {!loading && markers.length > 0 && (
+          <div style={styles.statLine}>
+            {markers.length.toLocaleString()} markers
+            {stateOptions.length > 0 ? ` across ${stateOptions.length} state${stateOptions.length === 1 ? '' : 's'}` : ''}
+          </div>
         )}
       </header>
 
-      {/* Category Filters — desktop only. On mobile these live in the
-          hamburger dropdown above, so the strip is removed to reclaim height. */}
-      {!isMobile && (
-      <div style={{
-        padding: '12px 28px',
-        background: '#fff',
-        borderBottom: '1px solid #e8e6e1',
-        overflowX: 'auto',
-        display: 'flex',
-        gap: '8px',
-        whiteSpace: 'nowrap',
-        alignItems: 'center',
-      }}>
-        {stateOptions.length > 1 && (
-          <>
+      {/* Search */}
+      <div style={styles.searchWrap}>
+        <input
+          type="text"
+          placeholder="Search markers by name, county, or theme…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={styles.searchInput}
+        />
+      </div>
+
+      {/* State lens */}
+      {!loading && stateOptions.length > 1 && (
+        <div style={styles.filterRow} role="group" aria-label="Filter markers by state">
+          <StateChip label="All" active={activeState === null} onClick={() => applyState(null)} />
+          {stateOptions.map((s) => (
             <StateChip
-              label="All"
-              active={activeState === null}
-              onClick={() => applyState(null)}
+              key={s.slug}
+              label={s.name}
+              active={activeState === s.name}
+              onClick={() => applyState(s)}
             />
-            {stateOptions.map(s => (
-              <StateChip
-                key={s.slug}
-                label={s.name}
-                active={activeState === s.name}
-                onClick={() => applyState(s)}
+          ))}
+        </div>
+      )}
+
+      {/* Body */}
+      {loading ? (
+        <div style={styles.loading}>Loading markers…</div>
+      ) : searchResults !== null ? (
+        // ---- Search view ----
+        <section>
+          <div style={styles.resultMeta}>
+            {searchResults.length} {searchResults.length === 1 ? 'marker' : 'markers'} matching
+            {' '}&ldquo;{searchQuery.trim()}&rdquo;
+          </div>
+          {searchResults.length === 0 ? (
+            <div style={styles.loading}>No markers match that search.</div>
+          ) : (
+            <div style={styles.markerList}>
+              {searchResults.map((m) => (
+                <MarkerCard
+                  key={m.id}
+                  marker={m}
+                  showCounty
+                  expanded={expanded.has(m.id)}
+                  loading={detailLoading.has(m.id)}
+                  detail={details[m.id]}
+                  onToggle={() => toggleExpand(m.id)}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      ) : activeCounty ? (
+        // ---- County view ----
+        <section>
+          <button type="button" onClick={() => setActiveCounty(null)} style={styles.backBtn}>
+            ← All counties
+          </button>
+          <h2 style={styles.countyHeading}>
+            {activeCounty.county} County
+            <span style={styles.countyState}> · {activeCounty.state}</span>
+          </h2>
+          <div style={styles.resultMeta}>
+            {countyMarkers.length} {countyMarkers.length === 1 ? 'marker' : 'markers'}
+          </div>
+
+          {countyMapPois.length > 0 && (
+            <div style={styles.mapSection}>
+              <MapView pois={countyMapPois} markerColor={MARKER_VIOLET} height="460px" />
+            </div>
+          )}
+
+          <div style={styles.markerList}>
+            {countyMarkers.map((m) => (
+              <MarkerCard
+                key={m.id}
+                marker={m}
+                expanded={expanded.has(m.id)}
+                loading={detailLoading.has(m.id)}
+                detail={details[m.id]}
+                onToggle={() => toggleExpand(m.id)}
               />
             ))}
-            <div style={{
-              width: '1px',
-              alignSelf: 'stretch',
-              background: '#e2e0db',
-              margin: '2px 8px',
-              flexShrink: 0,
-            }} />
-          </>
-        )}
-        <FilterChip
-          label="All"
-          count={scopedPois.length}
-          active={activeCategory === 'All'}
-          color="#1a1a2e"
-          onClick={() => setActiveCategory('All')}
-        />
-        {categories.map(cat => {
-          const color = getCategoryColor(cat);
-          const label = cat.charAt(0).toUpperCase() + cat.slice(1);
-          return (
-            <FilterChip
-              key={cat}
-              label={label}
-              count={scopedPois.filter(p => p.category === cat).length}
-              active={activeCategory === cat}
-              color={color}
-              onClick={() => setActiveCategory(cat)}
-            />
-          );
-        })}
-      </div>
+          </div>
+        </section>
+      ) : (
+        // ---- County index ----
+        <section>
+          {counties.length === 0 ? (
+            <div style={styles.loading}>No markers here yet.</div>
+          ) : (
+            <div style={styles.countyGrid}>
+              {counties.map((c) => (
+                <button
+                  key={`${c.state}|${c.county}`}
+                  type="button"
+                  onClick={() => setActiveCounty({ state: c.state, county: c.county })}
+                  style={styles.countyCard}
+                >
+                  {showStateTag && <div style={styles.countyCardState}>{c.state}</div>}
+                  <div style={styles.countyCardName}>{c.county} County</div>
+                  <div style={styles.countyCardCount}>
+                    {c.count} {c.count === 1 ? 'marker' : 'markers'}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
       )}
-      </div>
-      {/* end sticky controls wrapper */}
-
-      {/* Map + Sidebar — side-by-side on desktop, stacked on mobile */}
-      <div style={{
-        display: 'flex',
-        flexDirection: isMobile ? 'column' : 'row',
-        height: isMobile ? 'auto' : 'calc(100vh - 124px)',
-      }}>
-        {/* Map — on mobile this is a sticky pane pinned just below the sticky
-            controls block (which itself sits under the 94px global nav), so
-            the card list scrolls beneath a map that stays in view. Its top is
-            94px + the controls' measured height; z-index 20 sits above the
-            cards but below the controls (40) and nav (100). On desktop it's a
-            normal flex pane. */}
-        <div style={{
-          flex: isMobile ? 'none' : 1,
-          position: isMobile ? 'sticky' : 'relative',
-          top: isMobile ? `${94 + controlsH}px` : 'auto',
-          zIndex: isMobile ? 20 : 'auto',
-          height: isMobile ? '45vh' : 'auto',
-          minHeight: isMobile ? '300px' : 0,
-        }}>
-          {loading ? (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              background: '#e8e6e1',
-            }}>
-              <div style={{
-                fontFamily: "'Fraunces', serif",
-                fontSize: '20px',
-                color: '#888',
-              }}>Loading map...</div>
-            </div>
-          ) : (
-            <MapView
-              pois={filteredPois}
-              interactive={true}
-              height="100%"
-              compact={false}
-              onMarkerClick={(poi) => setSelectedPoi(poi)}
-            />
-          )}
-
-          {/* Result count */}
-          <div style={{
-            position: 'absolute',
-            bottom: '20px',
-            left: '20px',
-            background: '#1a1a2e',
-            color: '#fff',
-            padding: '8px 16px',
-            borderRadius: '20px',
-            fontSize: '13px',
-            fontWeight: 600,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
-            zIndex: 5,
-          }}>
-            {filteredPois.length} {filteredPois.length === 1 ? 'place' : 'places'}
-            {activeState ? ` · ${activeState}` : ''}
-            {activeCategory !== 'All' ? ` · ${activeCategory.charAt(0).toUpperCase() + activeCategory.slice(1)}` : ''}
-          </div>
-        </div>
-
-        {/* Sidebar */}
-        <div
-          ref={listRef}
-          style={{
-            width: isMobile ? '100%' : '360px',
-            overflowY: isMobile ? 'visible' : 'auto',
-            background: '#fff',
-            borderLeft: isMobile ? 'none' : '1px solid #e8e6e1',
-            borderTop: isMobile ? '1px solid #e8e6e1' : 'none',
-          }}
-        >
-          <div style={{
-            padding: '16px 20px 8px',
-            fontFamily: "'Fraunces', serif",
-            fontSize: '18px',
-            fontWeight: 700,
-            color: '#1a1a2e',
-            borderBottom: '1px solid #f0eeea',
-          }}>
-            Places to Discover
-          </div>
-
-          {filteredPois.length === 0 ? (
-            <div style={{ padding: '40px 20px', textAlign: 'center', color: '#999', fontSize: '14px' }}>
-              No places match your filters.
-            </div>
-          ) : (
-            filteredPois.map((poi) => (
-              <PoiCard
-                key={poi.id}
-                poi={poi}
-                isSelected={selectedPoi?.id === poi.id}
-                isMobile={isMobile}
-                controlsH={controlsH}
-                onClick={() => setSelectedPoi(poi)}
-              />
-            ))
-          )}
-        </div>
-      </div>
-    </div>
+    </main>
   );
 }
 
-/* Filter Chip */
-function FilterChip({ label, count, active, color, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '6px',
-        padding: '7px 14px',
-        borderRadius: '20px',
-        border: active ? `2px solid ${color}` : '2px solid transparent',
-        background: active ? `${color}14` : '#f5f4f1',
-        cursor: 'pointer',
-        fontFamily: "'Outfit', sans-serif",
-        fontSize: '13px',
-        fontWeight: active ? 600 : 500,
-        color: active ? color : '#666',
-        transition: 'all 0.15s ease',
-        whiteSpace: 'nowrap',
-        flexShrink: 0,
-      }}
-    >
-      {label !== 'All' && (
-        <span style={{
-          width: '8px',
-          height: '8px',
-          borderRadius: '50%',
-          background: color,
-          flexShrink: 0,
-        }} />
-      )}
-      {label}
-      <span style={{ fontSize: '11px', fontWeight: 600, opacity: 0.6 }}>{count}</span>
-    </button>
-  );
-}
+// ---- Sub-components ----
 
-/* State Lens Chip — filled-ink pill, no color dot, so it reads as a different
-   (coarser) control than the dotted category chips it sits beside. */
 function StateChip({ label, active, onClick }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      style={{
-        padding: '7px 14px',
-        borderRadius: '20px',
-        border: active ? '2px solid #1a1a2e' : '2px solid transparent',
-        background: active ? '#1a1a2e' : '#f5f4f1',
-        color: active ? '#fff' : '#666',
-        cursor: 'pointer',
-        fontFamily: "'Outfit', sans-serif",
-        fontSize: '13px',
-        fontWeight: active ? 700 : 500,
-        whiteSpace: 'nowrap',
-        flexShrink: 0,
-        transition: 'all 0.15s ease',
-      }}
+      style={{ ...styles.chip, ...(active ? styles.chipActive : styles.chipIdle) }}
     >
       {label}
     </button>
   );
 }
 
-/* Sidebar POI Card */
-function PoiCard({ poi, isSelected, isMobile, controlsH = 0, onClick }) {
-  const color = getCategoryColor(poi.category);
-  const label = poi.category
-    ? poi.category.charAt(0).toUpperCase() + poi.category.slice(1)
-    : 'Place';
+function MarkerCard({ marker, detail, expanded, loading, onToggle, showCounty = false }) {
+  const m = marker;
+  const teaser = m.note || m.commemorates || null;
+  const metaBits = [
+    m.marker_type,
+    m.city,
+    showCounty ? `${m.county} County` : null,
+    m.year,
+  ].filter(Boolean);
+  const canExpand = m.has_description || m.has_inscription;
 
   return (
-    <div
-      data-poi-id={poi.id}
-      onClick={onClick}
-      style={{
-        padding: '16px 20px',
-        borderBottom: '1px solid #f0eeea',
-        cursor: 'pointer',
-        background: isSelected ? '#faf9f7' : '#fff',
-        borderLeft: isSelected ? `3px solid ${color}` : '3px solid transparent',
-        transition: 'all 0.15s ease',
-        // Clears the full pinned stack — nav (94px) + sticky search/chips
-        // controls (controlsH) + 45vh map — when scrollIntoView aligns this
-        // card to 'start' on mobile; harmless on desktop. controlsH arrives by
-        // prop so the margin tracks the controls' real measured height.
-        scrollMarginTop: isMobile ? `calc(${94 + controlsH}px + 45vh + 10px)` : undefined,
-      }}
-    >
-      <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-        {poi.thumbnail_url && (
-          <img
-            src={thumbSrc(poi.thumbnail_url)}
-            alt={poi.name}
-            loading="lazy"
-            style={{
-              width: '60px',
-              height: '60px',
-              objectFit: 'cover',
-              borderRadius: '8px',
-              flexShrink: 0,
-              background: '#f0ebe4',
-            }}
-          />
-        )}
-        <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-        <span style={{
-          width: '8px', height: '8px',
-          borderRadius: '50%',
-          background: color,
-          flexShrink: 0,
-        }} />
-        <span style={{
-          fontSize: '11px',
-          fontWeight: 600,
-          color: color,
-          textTransform: 'uppercase',
-          letterSpacing: '0.5px',
-        }}>{label}</span>
-      </div>
+    <article style={styles.markerCard}>
+      <div style={styles.markerEyebrow}>{m.theme || 'Historical Marker'}</div>
+      <h3 style={styles.markerName}>{m.name}</h3>
 
-      <div style={{
-        fontFamily: "'Fraunces', serif",
-        fontSize: '15px',
-        fontWeight: 700,
-        color: '#1a1a2e',
-        lineHeight: 1.3,
-        marginBottom: '4px',
-      }}>{poi.name}</div>
-
-      {poi.tagline && (
-        <div style={{ fontSize: '13px', color: '#777', lineHeight: 1.4 }}>{poi.tagline}</div>
+      {metaBits.length > 0 && (
+        <div style={styles.markerMeta}>{metaBits.join(' · ')}</div>
       )}
 
-       <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginTop: '8px',
-      }}>
-        <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: '#999' }}>
-          {poi.visit_duration && <span>⏱ {poi.visit_duration}</span>}
-          {poi.admission && <span>🎟 {poi.admission}</span>}
+      {teaser && <p style={styles.markerTeaser}>{teaser}</p>}
+
+      {expanded && detail && (
+        <div style={styles.expandBody}>
+          {detail.description
+            ? detail.description.split(/\n\n+/).map((para, i) => (
+                <p key={i} style={styles.expandPara}>{para}</p>
+              ))
+            : null}
+          {detail.inscription && (
+            <blockquote style={styles.inscription}>
+              <div style={styles.inscriptionLabel}>Inscription</div>
+              {detail.inscription}
+            </blockquote>
+          )}
         </div>
-        <a
-          href={`/poi/${poi.slug || toSlug(poi.name)}`}
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            fontSize: '12px',
-            fontWeight: 600,
-            color: color,
-            textDecoration: 'none',
-          }}
-        >View Details →</a>
+      )}
+
+      <div style={styles.markerFooter}>
+        {canExpand && (
+          <button type="button" onClick={onToggle} style={styles.readMore}>
+            {loading ? 'Loading…' : expanded ? 'Show less' : 'Read more'}
+          </button>
+        )}
+        {m.hmdb_url && (
+          <a
+            href={m.hmdb_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={styles.hmdbLink}
+          >
+            View on HMdb ↗
+          </a>
+        )}
       </div>
-        </div>
-      </div>
-    </div>
+    </article>
   );
 }
+
+// ---- Styles ----
+
+const styles = {
+  main: {
+    maxWidth: '1100px',
+    margin: '0 auto',
+    padding: 'clamp(1rem, 4vw, 2.5rem)',
+    fontFamily: "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif",
+    color: COLORS.ink,
+  },
+  loading: {
+    textAlign: 'center',
+    padding: '4rem 1rem',
+    fontSize: '1.1rem',
+    color: COLORS.warmGray,
+  },
+
+  breadcrumb: {
+    fontSize: '0.9rem',
+    color: COLORS.warmGray,
+    marginBottom: '1.5rem',
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '0.5rem',
+    alignItems: 'center',
+  },
+  crumbLink: { color: COLORS.warmGray, textDecoration: 'none' },
+  crumbSep: { color: '#bbb' },
+  crumbCurrent: { color: COLORS.ink, fontWeight: 500 },
+
+  hero: {
+    marginBottom: '2rem',
+    paddingBottom: '2rem',
+    borderBottom: `3px solid ${COLORS.violet}`,
+    maxWidth: '48rem',
+  },
+  eyebrow: {
+    fontSize: '0.85rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.1em',
+    color: COLORS.violet,
+    marginBottom: '0.75rem',
+  },
+  title: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: 'clamp(2.5rem, 8vw, 4.5rem)',
+    fontWeight: 600,
+    margin: '0 0 1rem 0',
+    lineHeight: 1.05,
+    color: COLORS.ink,
+  },
+  tagline: {
+    fontSize: 'clamp(1.05rem, 2.2vw, 1.3rem)',
+    lineHeight: 1.55,
+    color: '#3a3a4e',
+    margin: '0 0 1rem 0',
+    fontStyle: 'italic',
+    fontFamily: "'Fraunces', Georgia, serif",
+  },
+  statLine: {
+    fontSize: '0.8rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: COLORS.warmGray,
+  },
+
+  searchWrap: { marginBottom: '1.25rem' },
+  searchInput: {
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '0.85rem 1.1rem',
+    borderRadius: '12px',
+    border: '1.5px solid #e2e2e2',
+    background: '#fff',
+    color: COLORS.ink,
+    fontSize: '1rem',
+    fontFamily: "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif",
+    outline: 'none',
+  },
+
+  filterRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '0.6rem',
+    marginBottom: '2rem',
+    alignItems: 'center',
+  },
+  chip: {
+    fontFamily: "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif",
+    fontSize: '0.9rem',
+    fontWeight: 600,
+    letterSpacing: '0.02em',
+    padding: '0.5rem 1.1rem',
+    borderRadius: '999px',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    lineHeight: 1.2,
+  },
+  chipIdle: { background: '#fff', color: COLORS.warmGray, border: '1.5px solid #e2e2e2' },
+  chipActive: { background: COLORS.ink, color: '#fff', border: `1.5px solid ${COLORS.ink}` },
+
+  // County index
+  countyGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 240px), 1fr))',
+    gap: '1rem',
+  },
+  countyCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    textAlign: 'left',
+    padding: '1.1rem 1.25rem',
+    background: '#fff',
+    border: '1px solid #ececec',
+    borderRadius: '14px',
+    borderTop: `4px solid ${COLORS.violet}`,
+    cursor: 'pointer',
+    fontFamily: "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif",
+    transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+  },
+  countyCardState: {
+    fontSize: '0.7rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: COLORS.violet,
+    marginBottom: '0.35rem',
+  },
+  countyCardName: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: '1.3rem',
+    fontWeight: 600,
+    color: COLORS.ink,
+    lineHeight: 1.15,
+    marginBottom: '0.4rem',
+  },
+  countyCardCount: { fontSize: '0.85rem', color: COLORS.warmGray, fontWeight: 500 },
+
+  // County view
+  backBtn: {
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    cursor: 'pointer',
+    color: COLORS.violet,
+    fontWeight: 600,
+    fontSize: '0.95rem',
+    fontFamily: "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif",
+    marginBottom: '1rem',
+  },
+  countyHeading: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: 'clamp(1.6rem, 5vw, 2.4rem)',
+    fontWeight: 600,
+    margin: '0 0 0.3rem 0',
+    color: COLORS.ink,
+  },
+  countyState: { color: COLORS.warmGray, fontWeight: 400 },
+  resultMeta: {
+    fontSize: '0.85rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    color: COLORS.warmGray,
+    marginBottom: '1.5rem',
+  },
+  mapSection: { marginBottom: '2rem' },
+
+  // Marker cards
+  markerList: { display: 'flex', flexDirection: 'column', gap: '1rem' },
+  markerCard: {
+    padding: 'clamp(1.1rem, 3vw, 1.5rem)',
+    background: '#fff',
+    border: '1px solid #ececec',
+    borderRadius: '14px',
+    borderLeft: `4px solid ${COLORS.violet}`,
+  },
+  markerEyebrow: {
+    fontSize: '0.72rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: COLORS.violet,
+    marginBottom: '0.4rem',
+  },
+  markerName: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: 'clamp(1.3rem, 3.5vw, 1.6rem)',
+    fontWeight: 600,
+    margin: '0 0 0.5rem 0',
+    lineHeight: 1.2,
+    color: COLORS.ink,
+    wordBreak: 'break-word',
+  },
+  markerMeta: {
+    fontSize: '0.85rem',
+    color: COLORS.warmGray,
+    marginBottom: '0.75rem',
+  },
+  markerTeaser: {
+    fontSize: '1rem',
+    lineHeight: 1.6,
+    color: '#3a3a4e',
+    margin: '0 0 0.5rem 0',
+    fontFamily: "'Fraunces', Georgia, serif",
+  },
+  expandBody: {
+    marginTop: '0.75rem',
+    paddingTop: '0.75rem',
+    borderTop: '1px solid #f0f0f0',
+  },
+  expandPara: {
+    fontSize: '1rem',
+    lineHeight: 1.7,
+    color: '#2a2a3e',
+    margin: '0 0 1rem 0',
+    fontFamily: "'Fraunces', Georgia, serif",
+  },
+  inscription: {
+    margin: '1rem 0 0 0',
+    padding: '0.75rem 1rem',
+    background: COLORS.paper,
+    borderLeft: `3px solid ${COLORS.yellow}`,
+    borderRadius: '0 8px 8px 0',
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontStyle: 'italic',
+    fontSize: '0.95rem',
+    lineHeight: 1.6,
+    color: '#3a3a4e',
+    whiteSpace: 'pre-line',
+  },
+  inscriptionLabel: {
+    fontSize: '0.68rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: COLORS.warmGray,
+    marginBottom: '0.4rem',
+    fontStyle: 'normal',
+    fontFamily: "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif",
+  },
+  markerFooter: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '1.25rem',
+    alignItems: 'center',
+    marginTop: '0.85rem',
+  },
+  readMore: {
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    cursor: 'pointer',
+    color: COLORS.violet,
+    fontWeight: 600,
+    fontSize: '0.9rem',
+    fontFamily: "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif",
+  },
+  hmdbLink: {
+    color: COLORS.warmGray,
+    fontWeight: 600,
+    fontSize: '0.85rem',
+    textDecoration: 'none',
+  },
+};
