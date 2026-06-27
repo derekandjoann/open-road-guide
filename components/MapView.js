@@ -219,10 +219,12 @@ export default function MapView({
     if (fitSig !== lastFitRef.current) {
       const bounds = new maplibregl.LngLatBounds();
       let boundPoints = 0;
+      let singlePoint = null;
       pois.forEach((poi) => {
         if (poi.longitude && poi.latitude) {
           bounds.extend([poi.longitude, poi.latitude]);
           boundPoints += 1;
+          singlePoint = [poi.longitude, poi.latitude];
         }
       });
       if (Array.isArray(routeLine)) {
@@ -230,11 +232,19 @@ export default function MapView({
           if (Array.isArray(coord) && coord.length >= 2) {
             bounds.extend([coord[0], coord[1]]);
             boundPoints += 1;
+            singlePoint = [coord[0], coord[1]];
           }
         });
       }
       if (boundPoints > 1) {
         map.fitBounds(bounds, { padding: 50, maxZoom: 12 });
+        lastFitRef.current = fitSig;
+      } else if (boundPoints === 1 && singlePoint) {
+        // A lone point can't make bounds — center on it instead of leaving the
+        // map at its default statewide view (which would strand, say, a single
+        // Nevada county marker on a map showing Utah).
+        map.setCenter(singlePoint);
+        map.setZoom(11);
         lastFitRef.current = fitSig;
       }
     }
