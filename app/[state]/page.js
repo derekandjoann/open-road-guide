@@ -122,7 +122,7 @@ export default async function StateHubPage({ params }) {
 
   // Everything is scoped to this state's canonical name. Routes also include
   // any drive that crosses into this state (state = name OR name in crossings).
-  const [poiRes, regionRes, storyRes, routeRes] = await Promise.all([
+  const [poiRes, regionRes, storyRes, routeRes, markerRes] = await Promise.all([
     supabase
       .from('pois')
       .select('id, name, slug, tagline, category, longitude, latitude')
@@ -146,6 +146,10 @@ export default async function StateHubPage({ params }) {
       .eq('published', true)
       .or(`state.eq.${name},crossing_states.cs.{"${name}"}`)
       .order('name', { ascending: true }),
+    supabase
+      .from('markers')
+      .select('id', { count: 'exact', head: true })
+      .eq('state', name),
   ]);
 
   const pois = (poiRes.data || []).filter(
@@ -157,6 +161,7 @@ export default async function StateHubPage({ params }) {
   }));
   const stories = storyRes.data || [];
   const routes = routeRes.data || [];
+  const markerCount = markerRes?.count || 0;
 
   const categories = [...new Set(pois.map((p) => p.category).filter(Boolean))].sort();
 
@@ -166,6 +171,7 @@ export default async function StateHubPage({ params }) {
     regions.length > 0 && stat(regions.length, 'region', 'regions'),
     stories.length > 0 && stat(stories.length, 'story', 'stories'),
     routes.length > 0 && stat(routes.length, 'drive', 'drives'),
+    markerCount > 0 && stat(markerCount, 'marker', 'markers'),
   ].filter(Boolean);
 
   return (
@@ -243,6 +249,30 @@ export default async function StateHubPage({ params }) {
               <StoryCard key={s.id} story={s} />
             ))}
           </div>
+        </section>
+      )}
+
+      {/* Historical markers */}
+      {markerCount > 0 && (
+        <section style={styles.section}>
+          <h2 style={styles.sectionHeading}>Historical Markers</h2>
+          <p style={styles.sectionSub}>
+            Roadside history, plaque by plaque — every marker in {name}, grouped by county and searchable.
+          </p>
+          <Link href={`/markers?state=${stateSlug}`} style={styles.markerCard}>
+            <div style={styles.markerCardMain}>
+              <div style={{ ...styles.cardEyebrow, color: COLORS.violet }}>Roadside History</div>
+              <h3 style={styles.cardTitle}>Markers of {name}</h3>
+              <p style={styles.markerCardText}>
+                Browse every historical marker across {name} — organized by county, each with its full plaque text.
+              </p>
+            </div>
+            <div style={styles.markerCardSide}>
+              <div style={styles.markerCount}>{markerCount}</div>
+              <div style={styles.markerCountLabel}>markers</div>
+              <div style={{ ...styles.cardCta, color: COLORS.violet }}>Browse by county →</div>
+            </div>
+          </Link>
         </section>
       )}
 
@@ -443,6 +473,28 @@ const styles = {
     padding: '0.35rem 0.75rem', borderRadius: '999px', marginBottom: '1rem',
   },
   cardCta: { fontSize: '0.9rem', fontWeight: 600, letterSpacing: '0.02em', marginTop: 'auto' },
+
+  markerCard: {
+    display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between',
+    gap: '1.5rem', padding: 'clamp(1.5rem, 4vw, 2rem)', background: '#fff',
+    border: '1px solid #ececec', borderRadius: '14px', borderTop: `4px solid ${COLORS.violet}`,
+    textDecoration: 'none', color: 'inherit', cursor: 'pointer',
+    transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+  },
+  markerCardMain: { flex: '1 1 300px' },
+  markerCardText: {
+    fontSize: '0.98rem', lineHeight: 1.55, color: '#444', margin: 0,
+    fontFamily: "'Fraunces', Georgia, serif", fontStyle: 'italic',
+  },
+  markerCardSide: { flex: '0 0 auto', textAlign: 'center', minWidth: '120px' },
+  markerCount: {
+    fontFamily: "'Fraunces', Georgia, serif", fontSize: 'clamp(2.5rem, 7vw, 3.5rem)',
+    fontWeight: 700, color: COLORS.violet, lineHeight: 1,
+  },
+  markerCountLabel: {
+    fontSize: '0.72rem', fontWeight: 600, textTransform: 'uppercase',
+    letterSpacing: '0.08em', color: COLORS.warmGray, marginBottom: '0.75rem',
+  },
 
   storyImageWrap: { width: '100%', aspectRatio: '16 / 9', overflow: 'hidden', background: '#f0eeea' },
   storyImage: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
