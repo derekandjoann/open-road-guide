@@ -3,8 +3,8 @@ import Script from 'next/script';
 import Nav from '../components/nav';
 
 export const metadata = {
-  title: 'Open Road Guide — Discover Utah Road Trip Stops',
-  description: 'Your ultimate road trip companion. Explore 131+ incredible stops across Utah with interactive maps and deep storytelling.',
+  title: 'Open Road Guide — Road Trip Guides to the American West',
+  description: 'Your road trip companion for the American West — interactive maps, scenic drives, regional guides, and the roadside history worth pulling over for.',
 };
 
 export default function RootLayout({ children }) {
