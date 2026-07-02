@@ -1,6 +1,6 @@
 'use client';
 
-// CategoryMap — the explorable Utah map that sits atop each category index
+// CategoryMap — the explorable map that sits atop each category index
 // page. One component, three modes: it draws every published route line, every
 // region footprint, or every story pin, each one clickable through to its page.
 //
@@ -54,34 +54,25 @@ const BASEMAP_STYLE = {
 
 // ---------------------------------------------------------------------------
 // Region "puzzle" geometry. Each region becomes one piece of a tessellation
-// that fills the whole state: every point in Utah is assigned to the region
-// whose POI centroid is nearest (a Voronoi partition), then clipped to the
-// state outline — no gaps, no overlaps. The math runs in an aspect-corrected
-// projection (lng * K, lat) so "nearest" matches real ground distance at
-// Utah's latitude, then un-projects back to lng/lat for the map.
+// that fills the bounding box of the supplied regions' POIs: every point is
+// assigned to the region whose POI centroid is nearest (a Voronoi partition),
+// then clipped to that box — no gaps, no overlaps. Nothing here is tied to a
+// particular state; the frame is derived from whatever regions get passed in,
+// so the same map frames Utah, Nevada, or any state added later with no code
+// change. The math runs in an aspect-corrected projection (lng * K, lat) so
+// "nearest" tracks real ground distance, then un-projects back to lng/lat.
 // ---------------------------------------------------------------------------
 const PUZZLE_K = Math.cos((39.5 * Math.PI) / 180);
 
-// Utah's outline for a faint state border (lng/lat): a big rectangle minus the
-// northeast (Wyoming) corner.
-const UTAH_OUTLINE = [
-  [-114.052, 36.998], [-114.052, 42.002], [-111.047, 42.002],
-  [-111.047, 41.001], [-109.041, 41.001], [-109.041, 36.998],
-  [-114.052, 36.998],
-];
-
-// That same outline as two convex rectangles (their union is Utah), in
-// projected x (= lng * PUZZLE_K) and raw lat — used to clip every cell.
-const UTAH_RECTS = [
-  { xmin: -114.052 * PUZZLE_K, xmax: -111.047 * PUZZLE_K, ymin: 36.998, ymax: 42.002 },
-  { xmin: -111.047 * PUZZLE_K, xmax: -109.041 * PUZZLE_K, ymin: 36.998, ymax: 41.001 },
-];
-
-// A starting polygon comfortably larger than the state (projected coords).
-const PUZZLE_BOUNDS = [
-  [-118 * PUZZLE_K, 35], [-106 * PUZZLE_K, 35],
-  [-106 * PUZZLE_K, 44], [-118 * PUZZLE_K, 44],
-];
+// A rectangle (from a projected-coord bbox {xmin,xmax,ymin,ymax}) as a ring.
+function rectPoly(b) {
+  return [
+    [b.xmin, b.ymin],
+    [b.xmax, b.ymin],
+    [b.xmax, b.ymax],
+    [b.xmin, b.ymax],
+  ];
+}
 
 // Sutherland–Hodgman: keep the part of `poly` where nx*x + ny*y <= c.
 function clipHalf(poly, nx, ny, c) {
@@ -122,8 +113,8 @@ function clipRect(poly, R) {
 
 // Voronoi cell of seed i = the bounds clipped by the perpendicular bisector
 // against every other seed (all seeds in projected coords).
-function voronoiCell(i, seeds) {
-  let cell = PUZZLE_BOUNDS.slice();
+function voronoiCell(i, seeds, framePoly) {
+  let cell = framePoly.slice();
   const s = seeds[i];
   for (let j = 0; j < seeds.length; j++) {
     if (j === i) continue;
@@ -138,12 +129,17 @@ function voronoiCell(i, seeds) {
   return cell;
 }
 
-// Build each region's puzzle piece as lng/lat MultiPolygon coordinates. A
-// region whose cell straddles the state's notched corner yields two rings.
+// Build each region's puzzle piece as lng/lat MultiPolygon coordinates. The
+// tessellation is framed by the bounding box of every supplied POI (padded a
+// little), so it fits whichever state's regions are passed in — no hardcoded
+// geography, and every future state works the same way.
 function regionPieces(regions) {
   const seeded = regions.filter(
     (r) => Array.isArray(r.points) && r.points.length
   );
+  if (!seeded.length) return [];
+
+  // Each region's seed = its POI centroid, in the aspect-corrected projection.
   const seeds = seeded.map((r) => {
     let x = 0;
     let y = 0;
@@ -153,17 +149,43 @@ function regionPieces(regions) {
     });
     return [x / r.points.length, y / r.points.length];
   });
+
+  // Bounding box of every POI (projected), padded so pieces breathe past the
+  // outermost stop. The Voronoi frame and the final clip both come from this —
+  // the one place the map's geography is defined, derived from the data itself.
+  let xmin = Infinity;
+  let xmax = -Infinity;
+  let ymin = Infinity;
+  let ymax = -Infinity;
+  seeded.forEach((r) =>
+    r.points.forEach((p) => {
+      const x = p[0] * PUZZLE_K;
+      const y = p[1];
+      if (x < xmin) xmin = x;
+      if (x > xmax) xmax = x;
+      if (y < ymin) ymin = y;
+      if (y > ymax) ymax = y;
+    })
+  );
+  const padX = Math.max((xmax - xmin) * 0.06, 0.1);
+  const padY = Math.max((ymax - ymin) * 0.06, 0.1);
+  const frame = {
+    xmin: xmin - padX,
+    xmax: xmax + padX,
+    ymin: ymin - padY,
+    ymax: ymax + padY,
+  };
+  const framePoly = rectPoly(frame);
+
   return seeded.map((r, i) => {
-    const cell = voronoiCell(i, seeds);
+    const cell = voronoiCell(i, seeds, framePoly);
+    const clipped = clipRect(cell, frame);
     const polys = [];
-    UTAH_RECTS.forEach((R) => {
-      const clipped = clipRect(cell, R);
-      if (clipped.length >= 3) {
-        const ring = clipped.map((p) => [p[0] / PUZZLE_K, p[1]]);
-        ring.push(ring[0]); // close the ring
-        polys.push([ring]);
-      }
-    });
+    if (clipped.length >= 3) {
+      const ring = clipped.map((p) => [p[0] / PUZZLE_K, p[1]]);
+      ring.push(ring[0]); // close the ring
+      polys.push([ring]);
+    }
     return { slug: r.slug, name: r.name, color: r.color, polys };
   });
 }
@@ -383,24 +405,6 @@ export default function CategoryMap({
             'line-opacity': 0.9,
           },
         });
-        // A faint dark outline of Utah anchors the puzzle to the whole state.
-        map.addSource('cat-utah', {
-          type: 'geojson',
-          data: {
-            type: 'Feature',
-            geometry: { type: 'LineString', coordinates: UTAH_OUTLINE },
-          },
-        });
-        map.addLayer({
-          id: 'cat-utah-line',
-          type: 'line',
-          source: 'cat-utah',
-          paint: {
-            'line-color': '#1a1a2e',
-            'line-opacity': 0.45,
-            'line-width': 1.3,
-          },
-        });
       }
 
       if (!wiredRef.current.regions) {
@@ -547,7 +551,7 @@ export default function CategoryMap({
     <div
       ref={containerRef}
       role="application"
-      aria-label="Interactive map of Utah"
+      aria-label="Interactive map"
       style={{
         width: '100%',
         height,
