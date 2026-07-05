@@ -35,6 +35,7 @@ export default async function MarkersPage() {
     return {
       id: p.id,
       name: p.name,
+      slug: p.slug,
       longitude: lng,
       latitude: lat,
       state: p.state,
