@@ -7,6 +7,28 @@ export const metadata = {
   description: 'Your road trip companion for the American West — interactive maps, scenic drives, regional guides, and the roadside history worth pulling over for.',
 };
 
+// Site-wide structured data: Organization (who publishes this) and WebSite
+// (what this is), shipped in the <head> of every page. Page-level types —
+// TouristAttraction, Article, TouristTrip, TouristDestination — live inline
+// in their own pages. Built once at module scope; "<" is escaped so nothing
+// can break out of the script tag.
+const siteJsonLd = JSON.stringify([
+  {
+    '@context': 'https://schema.org',
+    '@type': 'Organization',
+    name: 'Open Road Guide',
+    url: 'https://openroadguide.com',
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: 'Open Road Guide',
+    url: 'https://openroadguide.com',
+    description:
+      'Road trip guides to the American West — interactive maps, scenic drives, regional guides, and the roadside history worth pulling over for.',
+  },
+]).replace(/</g, '\\u003c');
+
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
@@ -22,6 +44,11 @@ export default function RootLayout({ children }) {
         <link
           href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
           rel="stylesheet"
+        />
+        {/* Structured data for search engines (read from the server-rendered HTML) */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: siteJsonLd }}
         />
       </head>
       <body>
