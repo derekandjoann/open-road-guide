@@ -176,6 +176,7 @@ export default function MapView({
           ">${poi.name}</div>
           ${poi.tagline ? `<div style="font-size: 13px; color: #555; line-height: 1.4;">${poi.tagline}</div>` : ''}
           ${poi.visit_duration ? `<div style="font-size: 11px; color: #888; margin-top: 6px;">⏱ ${poi.visit_duration}</div>` : ''}
+          ${poi.href ? `<a href="${poi.href}" style="display: inline-block; margin-top: 8px; font-size: 12px; font-weight: 600; color: #FF6B6B; text-decoration: none;">Read more →</a>` : ''}
         </div>
       `;
 
@@ -296,6 +297,7 @@ export default function MapView({
           ">${hm.name}</div>
           ${hm.note ? `<div style="font-size: 13px; color: #555; line-height: 1.4;">${hm.note}</div>` : ''}
           ${meta ? `<div style="font-size: 11px; color: #888; margin-top: 6px;">${meta}</div>` : ''}
+          ${hm.href ? `<a href="${hm.href}" style="display: inline-block; margin-top: 8px; font-size: 12px; font-weight: 600; color: #FF6B6B; text-decoration: none;">Read more →</a>` : ''}
         </div>
       `;
 
