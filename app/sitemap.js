@@ -2,21 +2,43 @@ import { supabase } from '../lib/supabase';
 
 const BASE = 'https://openroadguide.com';
 
-// Pull every published row for a table; never let a transient DB error
-// fail the whole build — fall back to an empty list and keep the rest.
-async function fetchRows(table) {
+// PostgREST returns at most 1000 rows per request. Content tables are
+// already past that in aggregate (described markers alone will be), so every
+// fetch pages until it comes up short.
+const PAGE = 1000;
+
+// Pull every matching row for a table, paging past the row cap; never let a
+// transient DB error fail the whole build — fall back to an empty list and
+// keep the rest.
+async function fetchAll(table, columns, applyFilters) {
+  const rows = [];
   try {
-    const { data, error } = await supabase
-      .from(table)
-      .select('slug, updated_at')
-      .eq('published', true);
-    if (error) throw error;
-    return data || [];
+    for (let from = 0; ; from += PAGE) {
+      let query = supabase
+        .from(table)
+        .select(columns)
+        .range(from, from + PAGE - 1);
+      if (applyFilters) query = applyFilters(query);
+      const { data, error } = await query;
+      if (error) throw error;
+      rows.push(...(data || []));
+      if (!data || data.length < PAGE) break;
+    }
   } catch (e) {
     console.error(`sitemap: failed to load "${table}":`, e?.message || e);
-    return [];
   }
+  return rows;
 }
+
+const published = (q) => q.eq('published', true);
+
+// Only described markers have pages — the quality bar is the point. Markers
+// carry no updated_at column, so their entries take the build date.
+const describedMarkers = (q) =>
+  q
+    .not('slug', 'is', null)
+    .not('description', 'is', null)
+    .neq('description', '');
 
 export default async function sitemap() {
   const now = new Date();
@@ -32,22 +54,25 @@ export default async function sitemap() {
     { url: `${BASE}/privacy`, lastModified: now, changeFrequency: 'yearly', priority: 0.3 },
   ];
 
-  const [pois, stories, routes, regions, states] = await Promise.all([
-    fetchRows('pois'),
-    fetchRows('stories'),
-    fetchRows('routes'),
-    fetchRows('regions'),
-    fetchRows('states'),
+  const [pois, stories, routes, regions, states, markers] = await Promise.all([
+    fetchAll('pois', 'slug, updated_at', published),
+    fetchAll('stories', 'slug, updated_at', published),
+    fetchAll('routes', 'slug, updated_at', published),
+    fetchAll('regions', 'slug, updated_at', published),
+    fetchAll('states', 'slug, updated_at', published),
+    fetchAll('markers', 'slug', describedMarkers),
   ]);
 
   // State hubs live at the top level (/utah, /nevada). High priority — they're
   // the front door for each state.
-  const stateHubs = states.map((row) => ({
-    url: `${BASE}/${row.slug}`,
-    lastModified: row.updated_at ? new Date(row.updated_at) : now,
-    changeFrequency: 'weekly',
-    priority: 0.9,
-  }));
+  const stateHubs = states
+    .filter((row) => row.slug)
+    .map((row) => ({
+      url: `${BASE}/${row.slug}`,
+      lastModified: row.updated_at ? new Date(row.updated_at) : now,
+      changeFrequency: 'weekly',
+      priority: 0.9,
+    }));
 
   const toEntry = (prefix, priority, changeFrequency) => (row) => ({
     url: `${BASE}/${prefix}/${row.slug}`,
@@ -59,9 +84,10 @@ export default async function sitemap() {
   return [
     ...staticPages,
     ...stateHubs,
-    ...pois.map(toEntry('poi', 0.7, 'monthly')),
-    ...routes.map(toEntry('route', 0.7, 'monthly')),
-    ...regions.map(toEntry('region', 0.7, 'monthly')),
-    ...stories.map(toEntry('story', 0.6, 'monthly')),
+    ...pois.filter((r) => r.slug).map(toEntry('poi', 0.7, 'monthly')),
+    ...routes.filter((r) => r.slug).map(toEntry('route', 0.7, 'monthly')),
+    ...regions.filter((r) => r.slug).map(toEntry('region', 0.7, 'monthly')),
+    ...stories.filter((r) => r.slug).map(toEntry('story', 0.6, 'monthly')),
+    ...markers.filter((r) => r.slug).map(toEntry('marker', 0.6, 'yearly')),
   ];
 }
