@@ -136,6 +136,7 @@ export default function MarkersIndexPage({ initialMarkers = [], initialStateOpti
         latitude: m.latitude,
         category: m.theme,
         tagline: m.note || m.commemorates || null,
+        href: m.has_description && m.slug ? `/marker/${m.slug}` : null,
       })),
     [countyMarkers]
   );
@@ -350,6 +351,11 @@ function MarkerCard({ marker, detail, expanded, loading, onToggle, showCounty = 
       )}
 
       <div style={styles.markerFooter}>
+        {m.has_description && m.slug && (
+          <Link href={`/marker/${m.slug}`} style={styles.pageLink}>
+            Full story →
+          </Link>
+        )}
         {canExpand && (
           <button type="button" onClick={onToggle} style={styles.readMore}>
             {loading ? 'Loading…' : expanded ? 'Show less' : 'Read more'}
@@ -620,6 +626,12 @@ const styles = {
     gap: '1.25rem',
     alignItems: 'center',
     marginTop: '0.85rem',
+  },
+  pageLink: {
+    color: COLORS.coral,
+    fontWeight: 600,
+    fontSize: '0.9rem',
+    textDecoration: 'none',
   },
   readMore: {
     background: 'none',
