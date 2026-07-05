@@ -174,8 +174,46 @@ export default async function StateHubPage({ params }) {
     markerCount > 0 && stat(markerCount, 'marker', 'markers'),
   ].filter(Boolean);
 
+  // ---------- Structured data (JSON-LD) ----------
+  // Ships in the server-rendered HTML. A TouristDestination describes the
+  // state hub itself; a BreadcrumbList mirrors the on-page Home › State
+  // trail so Google can show a breadcrumb in results. Only fields we
+  // actually have are emitted — no empty or guessed values.
+  const hubUrl = `https://openroadguide.com/${stateSlug}`;
+  const destinationLd = {
+    '@context': 'https://schema.org',
+    '@type': 'TouristDestination',
+    name,
+    description:
+      state.tagline ||
+      `Explore ${name} — the regions, scenic drives, stories, and roadside stops worth pulling over for.`,
+    url: hubUrl,
+    containedInPlace: { '@type': 'Country', name: 'United States' },
+  };
+  if (state.hero_image_url) {
+    destinationLd.image = state.hero_image_url;
+  }
+
+  const breadcrumbLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://openroadguide.com/' },
+      { '@type': 'ListItem', position: 2, name, item: hubUrl },
+    ],
+  };
+
+  // Escape "<" so prose containing "</script>" can't break out of the tag.
+  const jsonLdHtml = JSON.stringify([destinationLd, breadcrumbLd]).replace(/</g, '\\u003c');
+
   return (
     <main style={styles.main}>
+      {/* Structured data for search engines (read from the server-rendered HTML) */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLdHtml }}
+      />
+
       {/* Breadcrumb */}
       <nav style={styles.breadcrumb}>
         <Link href="/" style={styles.crumbLink}>Home</Link>
