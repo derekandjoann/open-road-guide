@@ -2,6 +2,14 @@ import { supabase } from '../lib/supabase';
 
 const BASE = 'https://openroadguide.com';
 
+// Regenerate the sitemap at most once a day (ISR) rather than baking it once at
+// build time. Marker prose lands in Supabase continuously as the writing
+// campaign rolls, and every content table grows between deploys; without this,
+// newly described markers and new POIs/stories stay out of the sitemap until the
+// next manual deploy. A daily rebuild keeps discovery current on its own — the
+// pages themselves already resolve the moment their prose exists.
+export const revalidate = 86400;
+
 // PostgREST returns at most 1000 rows per request. Content tables are
 // already past that in aggregate (described markers alone will be), so every
 // fetch pages until it comes up short.
