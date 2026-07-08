@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
 import MarkerMap from './MarkerMap';
+import { notFound } from 'next/navigation';
 
 // Render every marker page on demand (server-side) rather than statically at
 // build time, matching the POI and route pages. Marker descriptions land in
@@ -102,18 +103,11 @@ export default async function MarkerPage({ params }) {
 
   const marker = await fetchMarkerBySlug(slug);
 
+  // Undescribed or unknown slugs return a real 404 (not a soft 200): it keeps
+  // map-only markers out of search indexes and tells crawlers the truth. The
+  // branded screen is rendered by the site-wide app/not-found.js.
   if (!marker) {
-    return (
-      <main style={styles.main}>
-        <div style={styles.notFound}>
-          <h1 style={styles.notFoundTitle}>Marker not found</h1>
-          <p>We haven&apos;t written up a marker at &ldquo;{slug}&rdquo; yet.</p>
-          <Link href="/markers" style={styles.link}>
-            ← Browse all historical markers
-          </Link>
-        </div>
-      </main>
-    );
+    notFound();
   }
 
   const num = markerNumber(marker.external_id);
@@ -390,12 +384,6 @@ const styles = {
     color: COLORS.ink,
   },
 
-  notFound: { textAlign: 'center', padding: '5rem 1rem' },
-  notFoundTitle: {
-    fontFamily: "'Fraunces', Georgia, serif",
-    fontSize: '2rem',
-    marginBottom: '1rem',
-  },
   link: { color: COLORS.coral, textDecoration: 'none', fontWeight: 600 },
 
   breadcrumb: {
