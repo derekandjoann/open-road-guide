@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
 import MapView from '../../components/MapView';
 import MapLegend from '../../components/MapLegend';
+import { notFound } from 'next/navigation';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -104,18 +105,11 @@ export default async function StateHubPage({ params }) {
     .eq('published', true)
     .maybeSingle();
 
+  // Unknown or unpublished slug -> a real 404 via the site-wide app/not-found.js,
+  // not a soft 200. This route's [state] segment catches every bad top-level
+  // path, so without this guard they'd all resolve 200.
   if (!state) {
-    return (
-      <main style={styles.main}>
-        <div style={styles.notFound}>
-          <h1 style={styles.notFoundTitle}>State not found</h1>
-          <p>We aren&apos;t covering &ldquo;{stateSlug}&rdquo; yet.</p>
-          <Link href="/" style={styles.link}>
-            ← Back to Open Road Guide
-          </Link>
-        </div>
-      </main>
-    );
+    notFound();
   }
 
   const name = state.name;
