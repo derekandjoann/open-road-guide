@@ -48,6 +48,14 @@ const describedMarkers = (q) =>
     .not('description', 'is', null)
     .neq('description', '');
 
+// Only tags with editorial prose get sitemap entries — that's the ≥5-item set
+// we've written; blank tags stay out until they earn a description.
+const describedTags = (q) =>
+  q
+    .not('slug', 'is', null)
+    .not('description', 'is', null)
+    .neq('description', '');
+
 export default async function sitemap() {
   const now = new Date();
 
@@ -62,13 +70,14 @@ export default async function sitemap() {
     { url: `${BASE}/privacy`, lastModified: now, changeFrequency: 'yearly', priority: 0.3 },
   ];
 
-  const [pois, stories, routes, regions, states, markers] = await Promise.all([
+  const [pois, stories, routes, regions, states, markers, tags] = await Promise.all([
     fetchAll('pois', 'slug, updated_at', published),
     fetchAll('stories', 'slug, updated_at', published),
     fetchAll('routes', 'slug, updated_at', published),
     fetchAll('regions', 'slug, updated_at', published),
     fetchAll('states', 'slug, updated_at', published),
     fetchAll('markers', 'slug', describedMarkers),
+    fetchAll('tags', 'slug, updated_at', describedTags),
   ]);
 
   // State hubs live at the top level (/utah, /nevada). High priority — they're
@@ -97,5 +106,6 @@ export default async function sitemap() {
     ...regions.filter((r) => r.slug).map(toEntry('region', 0.7, 'monthly')),
     ...stories.filter((r) => r.slug).map(toEntry('story', 0.6, 'monthly')),
     ...markers.filter((r) => r.slug).map(toEntry('marker', 0.6, 'yearly')),
+    ...tags.filter((r) => r.slug).map(toEntry('tag', 0.5, 'monthly')),
   ];
 }
