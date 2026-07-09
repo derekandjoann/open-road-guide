@@ -1,14 +1,18 @@
-'use client';
-
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
+
+// Render on demand, server-side (matching the POI, route, and marker pages).
+// Tag prose and tagged POIs land in Supabase continuously; a tag's page
+// reflects the current data the moment it's requested, with no deploy.
+export const dynamic = 'force-dynamic';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
+
+const BASE = 'https://openroadguide.com';
 
 const toSlug = (s) =>
   s
@@ -41,12 +45,11 @@ function colorForCategory(categorySlug) {
 }
 
 // Normalize highway values so "Hwy 12" and "Highway 12" group together,
-// and stuff with no highway falls into "Other Roads"
+// and stuff with no highway falls into "Other Roads".
 function normalizeHighway(raw) {
   if (!raw || typeof raw !== 'string') return 'Other Roads';
   const trimmed = raw.trim();
   if (!trimmed) return 'Other Roads';
-  // Normalize common prefixes
   return trimmed
     .replace(/^hwy\.?\s+/i, 'Highway ')
     .replace(/^highway\s+/i, 'Highway ')
@@ -57,7 +60,7 @@ function normalizeHighway(raw) {
 }
 
 // Sort highways: numbered Highway / US- / I- / SR- groups first by number,
-// "Other Roads" always last
+// "Other Roads" always last.
 function highwaySortKey(name) {
   if (name === 'Other Roads') return [9999, name];
   const numMatch = name.match(/(\d+)/);
@@ -65,177 +68,152 @@ function highwaySortKey(name) {
   return [num, name];
 }
 
-function buildIntro(tag, poiCount, highways) {
-  if (tag?.description && tag.description.length > 40) {
-    return tag.description;
-  }
-  const realHighways = highways.filter((h) => h !== 'Other Roads');
-  const highwayList =
-    realHighways.length > 3
-      ? `${realHighways.slice(0, 3).join(', ')}, and more`
-      : realHighways.join(' and ');
-  const highwayPhrase = realHighways.length ? ` along ${highwayList}` : '';
-  return `Discover ${poiCount} ${tag.name.toLowerCase()} ${
-    poiCount === 1 ? 'destination' : 'destinations'
-  } in Utah${highwayPhrase}. Open Road Guide curates each stop with local context, seasonal tips, and the stories behind the place — so you know not just where to go, but when to go and why it matters.`;
+async function fetchTag(
+  slug,
+  columns = 'id, name, slug, description, seo_title, meta_description, category:tag_categories(id, name, slug)'
+) {
+  const { data } = await supabase
+    .from('tags')
+    .select(columns)
+    .eq('slug', slug)
+    .maybeSingle();
+  return data || null;
 }
 
-export default function TagPage() {
-  const params = useParams();
-  const slug = params?.slug;
+// Server-rendered per-tag metadata: real <title>/<meta>/canonical/OG in the
+// initial HTML, drawn from the tag's own seo_title / meta_description.
+export async function generateMetadata({ params }) {
+  const { slug } = await params;
+  const tag = await fetchTag(slug, 'name, description, seo_title, meta_description');
 
-  const [tag, setTag] = useState(null);
-  const [category, setCategory] = useState(null);
-  const [poisByHighway, setPoisByHighway] = useState({});
-  const [relatedTags, setRelatedTags] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
-
-  useEffect(() => {
-    if (!slug) return;
-
-    async function load() {
-      setLoading(true);
-
-      const { data: tagData, error: tagErr } = await supabase
-        .from('tags')
-        .select('id, name, slug, description, category:tag_categories(id, name, slug)')
-        .eq('slug', slug)
-        .maybeSingle();
-
-      if (tagErr || !tagData) {
-        setNotFound(true);
-        setLoading(false);
-        return;
-      }
-
-      setTag(tagData);
-      setCategory(tagData.category);
-      await loadPois(tagData.id);
-      setLoading(false);
-    }
-
-    async function loadPois(tagId) {
-      // Only published POIs, only columns that actually exist on the pois table
-      const { data: pairs } = await supabase
-        .from('poi_tags')
-        .select('poi:pois(id, name, slug, tagline, description, nearest_highway, nearest_city, category, thumbnail_url, published)')
-        .eq('tag_id', tagId);
-
-      const pois = (pairs || [])
-        .map((p) => p.poi)
-        .filter((p) => p && p.published !== false); // hide unpublished, allow null/true
-
-      // Group by normalized nearest_highway
-      const grouped = {};
-      pois.forEach((p) => {
-        const hwy = normalizeHighway(p.nearest_highway);
-        if (!grouped[hwy]) grouped[hwy] = [];
-        grouped[hwy].push(p);
-      });
-      // Sort POIs within each highway alphabetically
-      Object.keys(grouped).forEach((h) =>
-        grouped[h].sort((a, b) => a.name.localeCompare(b.name))
-      );
-      setPoisByHighway(grouped);
-
-      // Related tags: other tags co-occurring on these POIs
-      if (pois.length) {
-        const poiIds = pois.map((p) => p.id);
-        const { data: coTags } = await supabase
-          .from('poi_tags')
-          .select('tag:tags(id, name, slug, category:tag_categories(slug))')
-          .in('poi_id', poiIds);
-
-        const counts = {};
-        (coTags || []).forEach((row) => {
-          const t = row.tag;
-          if (!t || t.id === tagId) return;
-          if (!counts[t.id]) counts[t.id] = { tag: t, count: 0 };
-          counts[t.id].count += 1;
-        });
-        const related = Object.values(counts)
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 8)
-          .map((x) => x.tag);
-        setRelatedTags(related);
-      }
-    }
-
-    load();
-  }, [slug]);
-
-  useEffect(() => {
-    if (!tag) return;
-    const poiCount = Object.values(poisByHighway).reduce((n, arr) => n + arr.length, 0);
-    const title = `${tag.name} in Utah — ${poiCount} ${
-      poiCount === 1 ? 'Place' : 'Places'
-    } to Visit | Open Road Guide`;
-    const desc = `Explore ${poiCount} ${tag.name.toLowerCase()} ${
-      poiCount === 1 ? 'destination' : 'destinations'
-    } in Utah with insider tips, seasonal context, and the stories behind each stop.`;
-
-    document.title = title;
-
-    const setMeta = (selector, attr, value) => {
-      let el = document.querySelector(selector);
-      if (!el) {
-        el = document.createElement('meta');
-        const [, key, val] = selector.match(/\[(\w+)="([^"]+)"\]/) || [];
-        if (key && val) el.setAttribute(key, val);
-        document.head.appendChild(el);
-      }
-      el.setAttribute(attr, value);
-    };
-
-    setMeta('meta[name="description"]', 'content', desc);
-    setMeta('meta[property="og:title"]', 'content', title);
-    setMeta('meta[property="og:description"]', 'content', desc);
-    setMeta('meta[property="og:type"]', 'content', 'website');
-
-    let canonical = document.querySelector('link[rel="canonical"]');
-    if (!canonical) {
-      canonical = document.createElement('link');
-      canonical.setAttribute('rel', 'canonical');
-      document.head.appendChild(canonical);
-    }
-    canonical.setAttribute('href', `https://openroadguide.com/tag/${slug}`);
-  }, [tag, poisByHighway, slug]);
-
-  if (loading) {
-    return (
-      <main style={styles.main}>
-        <div style={styles.loading}>Loading…</div>
-      </main>
-    );
+  if (!tag) {
+    return { title: { absolute: 'Tag not found | Open Road Guide' } };
   }
 
-  if (notFound || !tag) {
-    return (
-      <main style={styles.main}>
-        <div style={styles.notFound}>
-          <h1 style={styles.notFoundTitle}>Tag not found</h1>
-          <p>We couldn&apos;t find a tag called &ldquo;{slug}&rdquo;.</p>
-          <Link href="/" style={styles.link}>
-            ← Back to Open Road Guide
-          </Link>
-        </div>
-      </main>
-    );
-  }
+  const title = tag.seo_title
+    ? `${tag.seo_title} | Open Road Guide`
+    : `${tag.name} | Open Road Guide`;
+  const description = (
+    tag.meta_description ||
+    tag.description ||
+    `Places tagged ${tag.name} across the American West.`
+  ).slice(0, 300);
+  const url = `${BASE}/tag/${slug}`;
 
-  const accentColor = colorForCategory(category?.slug);
-  const poiCount = Object.values(poisByHighway).reduce((n, arr) => n + arr.length, 0);
-  const highways = Object.keys(poisByHighway).sort((a, b) => {
+  return {
+    title: { absolute: title },
+    description,
+    alternates: { canonical: url },
+    openGraph: { title, description, type: 'website', url },
+  };
+}
+
+export default async function TagPage({ params }) {
+  const { slug } = await params;
+
+  const tag = await fetchTag(slug);
+  // Unknown slug -> real 404 via the site-wide app/not-found.js.
+  if (!tag) notFound();
+
+  const category = tag.category;
+
+  // Tagged POIs (published only), grouped by nearest highway.
+  const { data: pairs } = await supabase
+    .from('poi_tags')
+    .select(
+      'poi:pois(id, name, slug, tagline, description, nearest_highway, nearest_city, category, thumbnail_url, published)'
+    )
+    .eq('tag_id', tag.id);
+
+  const pois = (pairs || [])
+    .map((p) => p.poi)
+    .filter((p) => p && p.published !== false);
+
+  const grouped = {};
+  pois.forEach((p) => {
+    const hwy = normalizeHighway(p.nearest_highway);
+    if (!grouped[hwy]) grouped[hwy] = [];
+    grouped[hwy].push(p);
+  });
+  Object.keys(grouped).forEach((h) =>
+    grouped[h].sort((a, b) => a.name.localeCompare(b.name))
+  );
+
+  const poiCount = pois.length;
+  const highways = Object.keys(grouped).sort((a, b) => {
     const [na, sa] = highwaySortKey(a);
     const [nb, sb] = highwaySortKey(b);
     if (na !== nb) return na - nb;
     return sa.localeCompare(sb);
   });
-  const intro = buildIntro(tag, poiCount, highways);
+
+  // Related tags: other tags co-occurring on these POIs, most-shared first.
+  let relatedTags = [];
+  if (pois.length) {
+    const poiIds = pois.map((p) => p.id);
+    const { data: coTags } = await supabase
+      .from('poi_tags')
+      .select('tag:tags(id, name, slug, category:tag_categories(slug))')
+      .in('poi_id', poiIds);
+
+    const counts = {};
+    (coTags || []).forEach((row) => {
+      const t = row.tag;
+      if (!t || t.id === tag.id) return;
+      if (!counts[t.id]) counts[t.id] = { tag: t, count: 0 };
+      counts[t.id].count += 1;
+    });
+    relatedTags = Object.values(counts)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8)
+      .map((x) => x.tag);
+  }
+
+  const accentColor = colorForCategory(category?.slug);
+
+  // The editorial intro is the tag's own description when we've written one;
+  // otherwise a plain factual line (undescribed tags aren't in the sitemap).
+  const intro =
+    tag.description && tag.description.length > 40
+      ? tag.description
+      : `${poiCount} ${tag.name.toLowerCase()} ${
+          poiCount === 1 ? 'stop' : 'stops'
+        } across the guide.`;
+
+  // ---------- Structured data (JSON-LD) ----------
+  // A CollectionPage describes the tag landing page; a BreadcrumbList mirrors
+  // the on-page Home > Tag trail. Only fields we actually have are emitted.
+  const pageUrl = `${BASE}/tag/${slug}`;
+  const collectionLd = {
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: `${tag.name} — Open Road Guide`,
+    url: pageUrl,
+  };
+  if (tag.description) collectionLd.description = tag.description;
+
+  const breadcrumbLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Home', item: `${BASE}/` },
+      { '@type': 'ListItem', position: 2, name: tag.name, item: pageUrl },
+    ],
+  };
+
+  const jsonLdHtml = JSON.stringify([collectionLd, breadcrumbLd]).replace(
+    /</g,
+    '\\u003c'
+  );
 
   return (
     <main style={styles.main}>
+      {/* Structured data for search engines (read from the server-rendered HTML) */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLdHtml }}
+      />
+
       <nav style={styles.breadcrumb}>
         <Link href="/" style={styles.crumbLink}>Home</Link>
         <span style={styles.crumbSep}>›</span>
@@ -270,12 +248,10 @@ export default function TagPage() {
           <section key={hwy} style={styles.regionSection}>
             <h2 style={{ ...styles.regionTitle, color: accentColor }}>
               {hwy}
-              <span style={styles.regionCount}>
-                {poisByHighway[hwy].length}
-              </span>
+              <span style={styles.regionCount}>{grouped[hwy].length}</span>
             </h2>
             <div style={styles.poiGrid}>
-              {poisByHighway[hwy].map((poi) => {
+              {grouped[hwy].map((poi) => {
                 const preview =
                   poi.tagline ||
                   (poi.description && poi.description.length > 140
@@ -310,11 +286,7 @@ export default function TagPage() {
                 <Link
                   key={t.id}
                   href={`/tag/${t.slug || toSlug(t.name)}`}
-                  style={{
-                    ...styles.relatedPill,
-                    borderColor: color,
-                    color: color,
-                  }}
+                  style={{ ...styles.relatedPill, borderColor: color, color }}
                 >
                   {t.name}
                 </Link>
@@ -335,14 +307,6 @@ const styles = {
     fontFamily: "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif",
     color: '#1a1a2e',
   },
-  loading: { textAlign: 'center', padding: '4rem 1rem', fontSize: '1.1rem', color: '#666' },
-  notFound: { textAlign: 'center', padding: '4rem 1rem' },
-  notFoundTitle: {
-    fontFamily: "'Fraunces', Georgia, serif",
-    fontSize: 'clamp(1.75rem, 5vw, 2.5rem)',
-    marginBottom: '1rem',
-  },
-  link: { color: '#FF6B6B', textDecoration: 'none', fontWeight: 500 },
   breadcrumb: {
     fontSize: '0.9rem',
     color: '#666',
