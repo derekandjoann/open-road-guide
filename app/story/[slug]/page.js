@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import MileMarkersSignup from '../../../components/MileMarkersSignup';
 import { createClient } from '@supabase/supabase-js';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
 
@@ -358,6 +359,11 @@ export default async function StoryPage({ params }) {
             </div>
           </section>
         )}
+
+        {/* Mile Markers signup — readers who finish a story are the audience */}
+        <section style={{ margin: '3rem 0' }}>
+          <MileMarkersSignup variant="story" />
+        </section>
 
         {/* Closing */}
         <section style={styles.closing}>
