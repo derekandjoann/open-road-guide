@@ -116,7 +116,7 @@ export default async function StateHubPage({ params }) {
 
   // Everything is scoped to this state's canonical name. Routes also include
   // any drive that crosses into this state (state = name OR name in crossings).
-  const [poiRes, regionRes, storyRes, routeRes, markerRes] = await Promise.all([
+  const [poiRes, regionRes, storyRes, routeRes, markerRes, itinRes] = await Promise.all([
     supabase
       .from('pois')
       .select('id, name, slug, tagline, category, longitude, latitude')
@@ -144,6 +144,13 @@ export default async function StateHubPage({ params }) {
       .from('markers')
       .select('id', { count: 'exact', head: true })
       .eq('state', name),
+    supabase
+      .from('itineraries')
+      .select('id, slug, title, subtitle, days_count, total_miles, best_seasons, start_location, end_location')
+      .eq('published', true)
+      .eq('state', name)
+      .order('featured', { ascending: false })
+      .order('created_at', { ascending: true }),
   ]);
 
   const pois = (poiRes.data || []).filter(
@@ -156,6 +163,10 @@ export default async function StateHubPage({ params }) {
   const stories = storyRes.data || [];
   const routes = routeRes.data || [];
   const markerCount = markerRes?.count || 0;
+  const itineraries = itinRes.data || [];
+
+  // The hub shows at most six stories; the rest live on the filtered index.
+  const storiesToShow = stories.slice(0, 6);
 
   const categories = [...new Set(pois.map((p) => p.category).filter(Boolean))].sort();
 
@@ -165,6 +176,7 @@ export default async function StateHubPage({ params }) {
     regions.length > 0 && stat(regions.length, 'region', 'regions'),
     stories.length > 0 && stat(stories.length, 'story', 'stories'),
     routes.length > 0 && stat(routes.length, 'drive', 'drives'),
+    itineraries.length > 0 && stat(itineraries.length, 'itinerary', 'itineraries'),
     markerCount > 0 && stat(markerCount, 'marker', 'markers'),
   ].filter(Boolean);
 
@@ -254,6 +266,37 @@ export default async function StateHubPage({ params }) {
         </section>
       )}
 
+      {/* Plan a trip — day-by-day itineraries. Intent-first: this and the
+          drives sit above the browse-by-geography sections on purpose. */}
+      {itineraries.length > 0 && (
+        <section style={styles.section}>
+          <h2 style={styles.sectionHeading}>Plan a Trip</h2>
+          <p style={styles.sectionSub}>
+            Day-by-day plans — real drive times, honest overnights, and the permit fine print sorted before you leave.
+          </p>
+          <div style={styles.cardsGrid}>
+            {itineraries.map((it) => (
+              <ItineraryCard key={it.id} itinerary={it} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Scenic drives */}
+      {routes.length > 0 && (
+        <section style={styles.section}>
+          <h2 style={styles.sectionHeading}>Scenic Drives</h2>
+          <p style={styles.sectionSub}>
+            The roads themselves — traced end to end, with the stops worth making along the way.
+          </p>
+          <div style={styles.cardsGrid}>
+            {routes.map((rt) => (
+              <RouteCard key={rt.id} route={rt} />
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Regions */}
       {regions.length > 0 && (
         <section style={styles.section}>
@@ -269,18 +312,25 @@ export default async function StateHubPage({ params }) {
         </section>
       )}
 
-      {/* Stories */}
-      {stories.length > 0 && (
+      {/* Stories — the six newest; the rest live on the filtered stories index */}
+      {storiesToShow.length > 0 && (
         <section style={styles.section}>
           <h2 style={styles.sectionHeading}>Stories from {name}</h2>
           <p style={styles.sectionSub}>
             The histories behind the places — the people, the disasters, the inventions, and the long memory of the land.
           </p>
           <div style={styles.cardsGrid}>
-            {stories.map((s) => (
+            {storiesToShow.map((s) => (
               <StoryCard key={s.id} story={s} />
             ))}
           </div>
+          {stories.length > storiesToShow.length && (
+            <div style={styles.sectionMoreWrap}>
+              <Link href={`/stories?state=${stateSlug}`} style={styles.sectionMoreLink}>
+                All {stories.length} stories from {name} →
+              </Link>
+            </div>
+          )}
         </section>
       )}
 
@@ -305,21 +355,6 @@ export default async function StateHubPage({ params }) {
               <div style={{ ...styles.cardCta, color: COLORS.violet }}>Browse by county →</div>
             </div>
           </Link>
-        </section>
-      )}
-
-      {/* Scenic drives */}
-      {routes.length > 0 && (
-        <section style={styles.section}>
-          <h2 style={styles.sectionHeading}>Scenic Drives</h2>
-          <p style={styles.sectionSub}>
-            The roads themselves — traced end to end, with the stops worth making along the way.
-          </p>
-          <div style={styles.cardsGrid}>
-            {routes.map((rt) => (
-              <RouteCard key={rt.id} route={rt} />
-            ))}
-          </div>
         </section>
       )}
 
@@ -409,6 +444,45 @@ function RouteCard({ route }) {
         )}
       </div>
       <div style={{ ...styles.cardCta, color: c }}>Plan this drive →</div>
+    </Link>
+  );
+}
+
+function ItineraryCard({ itinerary }) {
+  // Sunny-yellow top border; text accents use a darker amber for contrast.
+  const border = COLORS.yellow;
+  const accent = '#946600';
+  const seasons = Array.isArray(itinerary.best_seasons)
+    ? itinerary.best_seasons.join(' · ')
+    : itinerary.best_seasons || '';
+  return (
+    <Link href={`/itinerary/${itinerary.slug}`} style={{ ...styles.card, borderTop: `4px solid ${border}` }}>
+      <div style={{ ...styles.cardEyebrow, color: accent }}>
+        {itinerary.days_count ? `${itinerary.days_count}-Day Itinerary` : 'Itinerary'}
+      </div>
+      <h3 style={styles.cardTitle}>{itinerary.title}</h3>
+      {itinerary.subtitle && <p style={styles.cardTagline}>{itinerary.subtitle}</p>}
+      <div style={styles.routeStats}>
+        {itinerary.days_count && (
+          <div style={{ ...styles.routeStat, borderLeft: `3px solid ${border}` }}>
+            <div style={styles.routeStatLabel}>Days</div>
+            <div style={styles.routeStatValue}>{itinerary.days_count}</div>
+          </div>
+        )}
+        {itinerary.total_miles && (
+          <div style={{ ...styles.routeStat, borderLeft: `3px solid ${border}` }}>
+            <div style={styles.routeStatLabel}>Distance</div>
+            <div style={styles.routeStatValue}>{itinerary.total_miles} mi</div>
+          </div>
+        )}
+        {seasons && (
+          <div style={{ ...styles.routeStat, borderLeft: `3px solid ${border}` }}>
+            <div style={styles.routeStatLabel}>Best</div>
+            <div style={styles.routeStatValue}>{seasons}</div>
+          </div>
+        )}
+      </div>
+      <div style={{ ...styles.cardCta, color: accent }}>See the day-by-day →</div>
     </Link>
   );
 }
@@ -537,6 +611,9 @@ const styles = {
   routeStat: { paddingLeft: '0.6rem' },
   routeStatLabel: { fontSize: '0.68rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: COLORS.warmGray },
   routeStatValue: { fontSize: '0.95rem', fontWeight: 600, color: COLORS.ink },
+
+  sectionMoreWrap: { textAlign: 'center', marginTop: '1.5rem' },
+  sectionMoreLink: { color: COLORS.coral, textDecoration: 'none', fontWeight: 600, fontSize: '0.95rem' },
 
   backWrap: { borderTop: '1px solid #ececec', paddingTop: '2rem', textAlign: 'center' },
   backLink: { color: COLORS.coral, textDecoration: 'none', fontWeight: 600, fontSize: '1rem' },
