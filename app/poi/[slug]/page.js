@@ -195,7 +195,7 @@ export default async function PoiDetailPage({ params }) {
     .filter(Boolean);
 
   // 3. Fetch stories, regions, and geo-nearby POIs in parallel.
-  const [{ data: storyRows }, { data: regionRows }, nearbyRes] = await Promise.all([
+  const [{ data: storyRows }, { data: regionRows }, { data: routeRows }, nearbyRes] = await Promise.all([
     // Stories that feature this POI via the story_pois join table.
     supabase
       .from('story_pois')
@@ -230,6 +230,20 @@ export default async function PoiDetailPage({ params }) {
       `)
       .eq('poi_id', poi.id),
 
+    // Scenic drive(s) this POI sits on, via the route_pois join table —
+    // powers the "On these drives" line in the hero and the breadcrumb-adjacent
+    // cross-linking that makes routes discoverable from their stops.
+    supabase
+      .from('route_pois')
+      .select(`
+        route:routes (
+          slug,
+          name,
+          published
+        )
+      `)
+      .eq('poi_id', poi.id),
+
     // NEARBY POIs by geographic distance (primary path). Calls nearby_pois(),
     // which ranks all other published POIs by great-circle distance. Only
     // attempted when this POI has a slug and coordinates.
@@ -253,6 +267,19 @@ export default async function PoiDetailPage({ params }) {
     .map((row) => row.region)
     .filter((r) => r && r.published)
     .sort((a, b) => a.name.localeCompare(b.name));
+
+  // Drives: only published, alphabetical. A stop on a scenic byway should
+  // always link back to the byway.
+  const drives = (routeRows || [])
+    .map((row) => row.route)
+    .filter((r) => r && r.published)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  // Breadcrumb geography: Home / State / Region / Place. The state hub slug is
+  // derived from the state's full name (matches states.slug for all current
+  // states); the region is this POI's first (alphabetical) published region.
+  const stateSlug = poi.state ? toSlug(poi.state) : null;
+  const crumbRegion = regions.length > 0 ? regions[0] : null;
 
   // 4. Resolve the "Nearby / Related" list. Prefer geographic results; fall
   //    back to theme-based (shared tags, then same category) only when geo is
@@ -371,14 +398,29 @@ export default async function PoiDetailPage({ params }) {
     };
   }
 
+  // Breadcrumb trail mirrors the on-page one: Home / State / Region / Place,
+  // dropping any level we don't have data for. Positions are renumbered so the
+  // list is always contiguous.
+  const crumbItems = [
+    { name: 'Home', item: 'https://openroadguide.com/' },
+    ...(stateSlug
+      ? [{ name: poi.state, item: `https://openroadguide.com/${stateSlug}` }]
+      : []),
+    ...(crumbRegion
+      ? [{ name: crumbRegion.name, item: `https://openroadguide.com/region/${crumbRegion.slug}` }]
+      : []),
+    { name: poi.name, item: poiUrl },
+  ];
+
   const breadcrumbLd = {
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
-    itemListElement: [
-      { '@type': 'ListItem', position: 1, name: 'Home', item: 'https://openroadguide.com/' },
-      { '@type': 'ListItem', position: 2, name: 'Explore', item: 'https://openroadguide.com/explore' },
-      { '@type': 'ListItem', position: 3, name: poi.name, item: poiUrl },
-    ],
+    itemListElement: crumbItems.map((c, i) => ({
+      '@type': 'ListItem',
+      position: i + 1,
+      name: c.name,
+      item: c.item,
+    })),
   };
 
   // Escape "<" so a description containing "</script>" can't break out of the tag.
@@ -437,8 +479,18 @@ export default async function PoiDetailPage({ params }) {
         whiteSpace: 'nowrap',
       }}>
         <a href="/" style={{ color: '#999', textDecoration: 'none' }}>Home</a>
-        {' / '}
-        <a href="/explore" style={{ color: '#999', textDecoration: 'none' }}>Explore</a>
+        {stateSlug && (
+          <>
+            {' / '}
+            <a href={`/${stateSlug}`} style={{ color: '#999', textDecoration: 'none' }}>{poi.state}</a>
+          </>
+        )}
+        {crumbRegion && (
+          <>
+            {' / '}
+            <a href={`/region/${crumbRegion.slug}`} style={{ color: '#999', textDecoration: 'none' }}>{crumbRegion.name}</a>
+          </>
+        )}
         {' / '}
         <span style={{ color: '#1a1a2e', fontWeight: 600 }}>{poi.name}</span>
       </div>
@@ -579,6 +631,43 @@ export default async function PoiDetailPage({ params }) {
                   }}
                 >
                   {(region.name || '').trim()}
+                </a>
+              ))}
+            </div>
+          )}
+
+          {/* Drive link(s) — surfaces which scenic byways this stop sits on */}
+          {drives.length > 0 && (
+            <div style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: 'clamp(13px, 2vw, 15px)',
+              fontWeight: 600,
+              marginBottom: '16px',
+            }}>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                color: 'rgba(255,255,255,0.55)',
+              }}>
+                <span aria-hidden="true" style={{ fontSize: '14px' }}>🛣️</span>
+                On {drives.length === 1 ? 'this drive' : 'these drives'}
+              </span>
+              {drives.map((drive) => (
+                <a
+                  key={drive.slug}
+                  href={`/route/${drive.slug}`}
+                  style={{
+                    color: 'rgba(255,255,255,0.92)',
+                    textDecoration: 'none',
+                    borderBottom: '1.5px solid rgba(78,205,196,0.85)',
+                    paddingBottom: '1px',
+                  }}
+                >
+                  {(drive.name || '').trim()}
                 </a>
               ))}
             </div>
