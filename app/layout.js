@@ -1,6 +1,7 @@
 import './globals.css';
 import Script from 'next/script';
 import Nav from '../components/nav';
+import Footer from '../components/footer';
 
 export const metadata = {
   title: 'Open Road Guide — Road Trip Guides to the American West',
@@ -54,6 +55,7 @@ export default function RootLayout({ children }) {
       <body>
         <Nav />
         {children}
+        <Footer />
 
         {/* Google Analytics (gtag.js) */}
         <Script
