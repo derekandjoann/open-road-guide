@@ -70,7 +70,7 @@ export default async function sitemap() {
     { url: `${BASE}/privacy`, lastModified: now, changeFrequency: 'yearly', priority: 0.3 },
   ];
 
-  const [pois, stories, routes, regions, states, markers, tags] = await Promise.all([
+  const [pois, stories, routes, regions, states, markers, tags, itineraries] = await Promise.all([
     fetchAll('pois', 'slug, updated_at', published),
     fetchAll('stories', 'slug, updated_at', published),
     fetchAll('routes', 'slug, updated_at', published),
@@ -78,6 +78,7 @@ export default async function sitemap() {
     fetchAll('states', 'slug, updated_at', published),
     fetchAll('markers', 'slug', describedMarkers),
     fetchAll('tags', 'slug, updated_at', describedTags),
+    fetchAll('itineraries', 'slug, updated_at', published),
   ]);
 
   // State hubs live at the top level (/utah, /nevada). High priority — they're
@@ -101,6 +102,7 @@ export default async function sitemap() {
   return [
     ...staticPages,
     ...stateHubs,
+    ...itineraries.filter((r) => r.slug).map(toEntry('itinerary', 0.8, 'monthly')),
     ...pois.filter((r) => r.slug).map(toEntry('poi', 0.7, 'monthly')),
     ...routes.filter((r) => r.slug).map(toEntry('route', 0.7, 'monthly')),
     ...regions.filter((r) => r.slug).map(toEntry('region', 0.7, 'monthly')),
