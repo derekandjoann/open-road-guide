@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
+import { notFound } from 'next/navigation';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -168,18 +169,10 @@ export default async function RegionPage({ params }) {
     .eq('published', true)
     .maybeSingle();
 
+  // Unknown or unpublished slug -> a real 404 via the site-wide
+  // app/not-found.js, not a soft 200 (the Phase C convention).
   if (!region) {
-    return (
-      <main style={styles.main}>
-        <div style={styles.notFound}>
-          <h1 style={styles.notFoundTitle}>Region not found</h1>
-          <p>We couldn&apos;t find a region called &ldquo;{slug}&rdquo;.</p>
-          <Link href="/" style={styles.link}>
-            ← Back to Open Road Guide
-          </Link>
-        </div>
-      </main>
-    );
+    notFound();
   }
 
   // Fetch the POIs that belong to this region (many-to-many via region_pois)
@@ -194,6 +187,44 @@ export default async function RegionPage({ params }) {
     .map((row) => row.poi)
     .filter((p) => p && p.published !== false)
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  // Stories set in this region, via the story_regions join table.
+  const { data: storyData } = await supabase
+    .from('story_regions')
+    .select(
+      'story:stories(id, slug, title, subtitle, story_type, hero_image_url, hero_image_alt, reading_time_minutes, published, published_at, created_at)'
+    )
+    .eq('region_id', region.id);
+
+  const regionStories = (storyData || [])
+    .map((row) => row.story)
+    .filter((s) => s && s.published)
+    .sort((a, b) => {
+      const aDate = a.published_at || a.created_at;
+      const bDate = b.published_at || b.created_at;
+      return new Date(bDate) - new Date(aDate);
+    });
+
+  // Scenic drives through this region. There is no region_routes table by
+  // design — a drive is "in" a region when it shares a stop with it, so the
+  // set is derived live: this region's POI ids -> route_pois -> routes.
+  const placeIds = places.map((pl) => pl.id).filter(Boolean);
+  let regionDrives = [];
+  if (placeIds.length > 0) {
+    const { data: routeData } = await supabase
+      .from('route_pois')
+      .select(
+        'route:routes(id, slug, name, short_description, total_miles, estimated_drive_hours, published)'
+      )
+      .in('poi_id', placeIds);
+
+    const seen = new Set();
+    regionDrives = (routeData || [])
+      .map((row) => row.route)
+      .filter((r) => r && r.published)
+      .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }
 
   // Split description into paragraphs
   const paragraphs = (region.description || '')
@@ -384,6 +415,63 @@ export default async function RegionPage({ params }) {
                 </div>
               </div>
             ))}
+          </section>
+        )}
+
+        {/* Scenic drives through this region — derived from shared stops */}
+        {regionDrives.length > 0 && (
+          <section style={styles.subSection}>
+            <h2 style={styles.subHeading}>Scenic Drives through {region.name}</h2>
+            <div style={styles.subGrid}>
+              {regionDrives.map((rt) => (
+                <Link
+                  key={rt.id}
+                  href={`/route/${rt.slug}`}
+                  style={{ ...styles.subCard, borderTop: '4px solid #4ECDC4' }}
+                >
+                  <div style={{ ...styles.subCardEyebrow, color: '#0f5957' }}>Scenic Byway</div>
+                  <h3 style={styles.subCardTitle}>{rt.name}</h3>
+                  {rt.short_description && (
+                    <p style={styles.subCardText}>{rt.short_description}</p>
+                  )}
+                  {(rt.total_miles || rt.estimated_drive_hours) && (
+                    <div style={styles.subCardMeta}>
+                      {[
+                        rt.total_miles && `${rt.total_miles} mi`,
+                        rt.estimated_drive_hours && `${rt.estimated_drive_hours} hrs`,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </div>
+                  )}
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Stories set in this region */}
+        {regionStories.length > 0 && (
+          <section style={styles.subSection}>
+            <h2 style={styles.subHeading}>Stories from {region.name}</h2>
+            <div style={styles.subGrid}>
+              {regionStories.map((st) => (
+                <Link
+                  key={st.id}
+                  href={`/story/${st.slug}`}
+                  style={{ ...styles.subCard, borderTop: '4px solid #FF6B6B' }}
+                >
+                  {st.story_type && (
+                    <div style={{ ...styles.subCardEyebrow, color: '#c43d2d' }}>{st.story_type}</div>
+                  )}
+                  <h3 style={styles.subCardTitle}>{st.title}</h3>
+                  {st.subtitle && <p style={styles.subCardText}>{st.subtitle}</p>}
+                  {st.reading_time_minutes && (
+                    <div style={styles.subCardMeta}>{st.reading_time_minutes} min read</div>
+                  )}
+                </Link>
+              ))}
+            </div>
           </section>
         )}
 
@@ -609,6 +697,61 @@ const styles = {
     fontWeight: 600,
     color: COLORS.coral,
     letterSpacing: '0.02em',
+  },
+
+  subSection: { marginBottom: '3rem' },
+  subHeading: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: 'clamp(1.4rem, 3.5vw, 1.9rem)',
+    fontWeight: 600,
+    margin: '0 0 1.25rem 0',
+    color: COLORS.ink,
+  },
+  subGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))',
+    gap: '1.25rem',
+  },
+  subCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    padding: 'clamp(1.1rem, 3vw, 1.5rem)',
+    background: '#fff',
+    border: '1px solid #ececec',
+    borderRadius: '14px',
+    textDecoration: 'none',
+    color: 'inherit',
+    cursor: 'pointer',
+  },
+  subCardEyebrow: {
+    fontSize: '0.72rem',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    marginBottom: '0.45rem',
+  },
+  subCardTitle: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: 'clamp(1.15rem, 3vw, 1.4rem)',
+    fontWeight: 600,
+    margin: '0 0 0.5rem 0',
+    lineHeight: 1.2,
+    color: COLORS.ink,
+  },
+  subCardText: {
+    fontSize: '0.92rem',
+    lineHeight: 1.5,
+    color: '#444',
+    margin: '0 0 0.75rem 0',
+    fontStyle: 'italic',
+    fontFamily: "'Fraunces', Georgia, serif",
+    flexGrow: 1,
+  },
+  subCardMeta: {
+    fontSize: '0.78rem',
+    color: COLORS.warmGray,
+    marginTop: 'auto',
+    fontWeight: 600,
   },
 
   closing: {
