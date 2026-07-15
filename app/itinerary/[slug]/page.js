@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
 import { notFound } from 'next/navigation';
+import ItineraryDriveMap from '../../../components/ItineraryDriveMap';
 
 // Render every itinerary on demand (server-side) rather than statically at
 // build time — same rationale as the POI and marker pages: the prose lives in
@@ -173,7 +174,7 @@ export default async function ItineraryPage({ params }) {
       .order('day_number', { ascending: true }),
     supabase
       .from('itinerary_routes')
-      .select('sort_order, route:routes(slug, name, short_description, total_miles, published)')
+      .select('sort_order, route:routes(slug, name, short_description, total_miles, published, path_geojson)')
       .eq('itinerary_id', itin.id)
       .order('sort_order', { ascending: true }),
   ]);
@@ -182,6 +183,45 @@ export default async function ItineraryPage({ params }) {
   const drives = (routeRows || [])
     .map((row) => row.route)
     .filter((r) => r && r.published);
+
+  // ---------- Drive-map inputs ----------
+  // The animated map needs the trip's road geometry plus each day's stops
+  // with coordinates. It renders ONLY when the itinerary follows exactly one
+  // drive with geometry (routes.path_geojson, a bare [lng, lat] array) —
+  // that single line IS the trip's corridor, so stops project onto it
+  // truthfully. A trip stitched from several byways (Utah's Mighty Five
+  // follows four) has no honest single line to animate: the connecting
+  // highways between segments aren't in any route's geometry, so projecting
+  // its stops onto one segment would place days wrongly. Those trips simply
+  // skip the map until real end-to-end corridor geometry exists. Stops come
+  // from the itinerary_day_pois junction — published POIs only, tagged with
+  // their day so the client can color and order them.
+  const driveGeometries = drives
+    .map((r) => r.path_geojson)
+    .filter((g) => Array.isArray(g) && g.length > 1);
+  const driveLine = driveGeometries.length === 1 ? driveGeometries[0] : null;
+
+  let driveStops = [];
+  if (driveLine && days.length > 0) {
+    const dayById = new Map(days.map((d) => [d.id, d.day_number]));
+    const { data: stopRows } = await supabase
+      .from('itinerary_day_pois')
+      .select('itinerary_day_id, sort_order, poi:pois(slug, name, latitude, longitude, published)')
+      .in('itinerary_day_id', days.map((d) => d.id))
+      .order('sort_order', { ascending: true });
+    driveStops = (stopRows || [])
+      .filter((row) => row.poi && row.poi.published && row.poi.latitude != null && row.poi.longitude != null)
+      .map((row) => ({
+        day_number: dayById.get(row.itinerary_day_id),
+        sort_order: row.sort_order,
+        slug: row.poi.slug,
+        name: row.poi.name,
+        latitude: row.poi.latitude,
+        longitude: row.poi.longitude,
+      }))
+      .filter((s) => s.day_number != null);
+  }
+  const showDriveMap = Boolean(driveLine) && driveStops.length >= 2;
 
   const stateSlug = toSlug(itin.state);
   const pageUrl = `https://openroadguide.com/itinerary/${slug}`;
@@ -316,6 +356,25 @@ export default async function ItineraryPage({ params }) {
         </aside>
       )}
 
+      {/* The drive, animated — press play and the trip runs itself */}
+      {showDriveMap && (
+        <section style={styles.driveMapSection}>
+          <h2 style={styles.driveMapHeading}>The drive, day by day</h2>
+          <p style={styles.driveMapSub}>
+            Press play to run the whole route, drag to any mile, or jump straight to a day.
+            Every stop links to its own page.
+          </p>
+          <ItineraryDriveMap
+            routeLine={driveLine}
+            days={days.map((d) => ({ day_number: d.day_number, title: d.title }))}
+            stops={driveStops}
+            totalMiles={itin.total_miles}
+            startLabel={itin.start_location || ''}
+            endLabel={itin.end_location || ''}
+          />
+        </section>
+      )}
+
       {/* The days */}
       <section style={styles.daysSection}>
         {days.map((d) => {
@@ -448,6 +507,13 @@ const styles = {
     margin: '0 0 0.75rem 0', color: '#946600',
   },
   practicalPara: { fontSize: '0.97rem', lineHeight: 1.7, margin: '0 0 0.8rem 0', color: '#3a3a2e' },
+
+  driveMapSection: { marginBottom: '2.75rem' },
+  driveMapHeading: {
+    fontFamily: "'Fraunces', Georgia, serif", fontSize: 'clamp(1.4rem, 4vw, 1.9rem)',
+    fontWeight: 600, margin: '0 0 0.4rem 0', color: COLORS.ink,
+  },
+  driveMapSub: { fontSize: '0.98rem', color: COLORS.warmGray, margin: '0 0 1.25rem 0', lineHeight: 1.5 },
 
   daysSection: { marginBottom: '3rem' },
   dayCard: {
