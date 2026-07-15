@@ -195,7 +195,7 @@ export default async function PoiDetailPage({ params }) {
     .filter(Boolean);
 
   // 3. Fetch stories, regions, and geo-nearby POIs in parallel.
-  const [{ data: storyRows }, { data: regionRows }, { data: routeRows }, nearbyRes] = await Promise.all([
+  const [{ data: storyRows }, { data: regionRows }, { data: routeRows }, nearbyRes, nearbyMarkersRes] = await Promise.all([
     // Stories that feature this POI via the story_pois join table.
     supabase
       .from('story_pois')
@@ -249,6 +249,14 @@ export default async function PoiDetailPage({ params }) {
     // attempted when this POI has a slug and coordinates.
     (poi.slug && poi.latitude != null && poi.longitude != null)
       ? supabase.rpc('nearby_pois', { target_slug: poi.slug, max_results: 6 })
+      : Promise.resolve({ data: null }),
+
+    // NEARBY MARKERS by geographic distance. Calls nearby_markers(), the twin
+    // of nearby_pois(): the nearest described + slugged historical markers.
+    // Closes the cross-type loop so POI pages link out to marker pages (which
+    // already link back to POIs). Same slug + coordinates guard.
+    (poi.slug && poi.latitude != null && poi.longitude != null)
+      ? supabase.rpc('nearby_markers', { target_slug: poi.slug, max_results: 6 })
       : Promise.resolve({ data: null }),
   ]);
 
@@ -345,6 +353,14 @@ export default async function PoiDetailPage({ params }) {
       relatedPois = sameCategory || [];
     }
   }
+
+  // Nearby historical markers (geo only). Capped at 30 mi so "nearby" stays
+  // honest — roughly the radius the marker page uses for its own nearby lists.
+  // Silently empty when this POI has no described markers within range (e.g.
+  // Arizona, whose markers aren't imported yet), so the section won't render.
+  const nearbyMarkers = (nearbyMarkersRes?.data || []).filter(
+    (m) => m && m.slug && m.distance_miles != null && m.distance_miles <= 30
+  );
 
   // ---------- Main render ----------
   const color = getCategoryColor(poi.category);
@@ -1136,6 +1152,103 @@ export default async function PoiDetailPage({ params }) {
                         color: '#888',
                         lineHeight: 1.4,
                       }}>{rp.tagline}</div>
+                    )}
+                  </a>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {nearbyMarkers.length > 0 && (
+          <section style={{ marginTop: '4px', marginBottom: '60px' }}>
+            <h2 style={{
+              fontFamily: "'Fraunces', serif",
+              fontSize: 'clamp(22px, 4.5vw, 24px)',
+              fontWeight: 800,
+              color: '#1a1a2e',
+              marginBottom: '6px',
+            }}>Historical markers nearby</h2>
+            <p style={{
+              fontSize: '14px',
+              color: '#888',
+              marginBottom: '18px',
+            }}>Roadside plaques and monuments within a short detour</p>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+              gap: '14px',
+            }}>
+              {nearbyMarkers.map((m) => {
+                const distanceLabel = formatDistance(m.distance_miles);
+                const context = m.city
+                  ? (m.state && m.state !== poi.state ? `${m.city}, ${m.state}` : m.city)
+                  : (m.state && m.state !== poi.state ? m.state : null);
+                return (
+                  <a
+                    key={m.slug}
+                    href={`/marker/${m.slug}`}
+                    style={{
+                      background: '#fff',
+                      borderRadius: '12px',
+                      padding: '18px',
+                      textDecoration: 'none',
+                      border: '1.5px solid #e8e6e1',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px',
+                    }}
+                  >
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      justifyContent: 'space-between',
+                    }}>
+                      <span style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        minWidth: 0,
+                      }}>
+                        <span style={{
+                          width: '8px', height: '8px',
+                          borderRadius: '50%',
+                          background: '#9D4EDD',
+                          flexShrink: 0,
+                        }} />
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          color: '#9D4EDD',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.5px',
+                        }}>Marker</span>
+                      </span>
+                      {distanceLabel && (
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          color: '#aaa',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                        }}>{distanceLabel}</span>
+                      )}
+                    </div>
+                    <div style={{
+                      fontFamily: "'Fraunces', serif",
+                      fontSize: '15px',
+                      fontWeight: 700,
+                      color: '#1a1a2e',
+                      lineHeight: 1.3,
+                    }}>{m.name}</div>
+                    {context && (
+                      <div style={{
+                        fontSize: '13px',
+                        color: '#888',
+                        lineHeight: 1.4,
+                      }}>{context}</div>
                     )}
                   </a>
                 );
