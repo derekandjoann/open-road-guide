@@ -429,7 +429,7 @@ export default async function RoutePage({ params }) {
             return (
               <li key={stop.id} style={styles.stopItem}>
                 <div style={styles.stopMarkerCol}>
-                  <div style={styles.stopNumber}>{stop.order_index}</div>
+                  <div style={styles.stopNumber}>{idx + 1}</div>
                   {!isLast && <div style={styles.stopConnector} />}
                 </div>
                 <div style={styles.stopContent}>
