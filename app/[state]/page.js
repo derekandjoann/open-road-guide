@@ -116,7 +116,7 @@ export default async function StateHubPage({ params }) {
 
   // Everything is scoped to this state's canonical name. Routes also include
   // any drive that crosses into this state (state = name OR name in crossings).
-  const [poiRes, regionRes, storyRes, routeRes, markerRes, itinRes] = await Promise.all([
+  const [poiRes, regionRes, storyRes, routeRes, markerRes, itinRes, trailRes] = await Promise.all([
     supabase
       .from('pois')
       .select('id, name, slug, tagline, category, longitude, latitude')
@@ -151,6 +151,15 @@ export default async function StateHubPage({ params }) {
       .eq('state', name)
       .order('featured', { ascending: false })
       .order('created_at', { ascending: true }),
+    // Cross-state trails have no single state — they surface on every state
+    // they cross, matched via crossing_states (same idea as multi-state routes).
+    supabase
+      .from('trails')
+      .select('id, slug, title, subtitle, best_seasons, crossing_states')
+      .eq('published', true)
+      .contains('crossing_states', [name])
+      .order('featured', { ascending: false })
+      .order('sort_order', { ascending: true }),
   ]);
 
   const pois = (poiRes.data || []).filter(
@@ -164,6 +173,7 @@ export default async function StateHubPage({ params }) {
   const routes = routeRes.data || [];
   const markerCount = markerRes?.count || 0;
   const itineraries = itinRes.data || [];
+  const trails = trailRes.data || [];
 
   // The hub shows at most six stories; the rest live on the filtered index.
   const storiesToShow = stories.slice(0, 6);
@@ -177,6 +187,7 @@ export default async function StateHubPage({ params }) {
     stories.length > 0 && stat(stories.length, 'story', 'stories'),
     routes.length > 0 && stat(routes.length, 'drive', 'drives'),
     itineraries.length > 0 && stat(itineraries.length, 'itinerary', 'itineraries'),
+    trails.length > 0 && stat(trails.length, 'trail', 'trails'),
     markerCount > 0 && stat(markerCount, 'marker', 'markers'),
   ].filter(Boolean);
 
@@ -292,6 +303,22 @@ export default async function StateHubPage({ params }) {
           <div style={styles.cardsGrid}>
             {routes.map((rt) => (
               <RouteCard key={rt.id} route={rt} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Cross-state trails — themed journeys that thread this state into the
+          wider West. Surfaced via crossing_states, same as multi-state drives. */}
+      {trails.length > 0 && (
+        <section style={styles.section}>
+          <h2 style={styles.sectionHeading}>Trails Across the West</h2>
+          <p style={styles.sectionSub}>
+            Themed journeys that thread {name} into the wider West — one story, told state to state.
+          </p>
+          <div style={styles.cardsGrid}>
+            {trails.map((tr) => (
+              <TrailCard key={tr.id} trail={tr} />
             ))}
           </div>
         </section>
@@ -444,6 +471,36 @@ function RouteCard({ route }) {
         )}
       </div>
       <div style={{ ...styles.cardCta, color: c }}>Plan this drive →</div>
+    </Link>
+  );
+}
+
+function TrailCard({ trail }) {
+  const c = COLORS.violet;
+  const states = Array.isArray(trail.crossing_states) ? trail.crossing_states.length : 0;
+  const seasons = Array.isArray(trail.best_seasons)
+    ? trail.best_seasons.join(' · ')
+    : trail.best_seasons || '';
+  return (
+    <Link href={`/trail/${trail.slug}`} style={{ ...styles.card, borderTop: `4px solid ${c}` }}>
+      <div style={{ ...styles.cardEyebrow, color: c }}>Cross-State Trail</div>
+      <h3 style={styles.cardTitle}>{trail.title}</h3>
+      {trail.subtitle && <p style={styles.cardTagline}>{trail.subtitle}</p>}
+      <div style={styles.routeStats}>
+        {states > 0 && (
+          <div style={{ ...styles.routeStat, borderLeft: `3px solid ${c}` }}>
+            <div style={styles.routeStatLabel}>Spans</div>
+            <div style={styles.routeStatValue}>{states} states</div>
+          </div>
+        )}
+        {seasons && (
+          <div style={{ ...styles.routeStat, borderLeft: `3px solid ${c}` }}>
+            <div style={styles.routeStatLabel}>Best</div>
+            <div style={styles.routeStatValue}>{seasons}</div>
+          </div>
+        )}
+      </div>
+      <div style={{ ...styles.cardCta, color: c }}>Follow this trail →</div>
     </Link>
   );
 }
