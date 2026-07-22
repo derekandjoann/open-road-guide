@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
 import MapView from '../components/MapView';
 import MapLegend from '../components/MapLegend';
+import USStatusMap from '../components/USStatusMap';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -116,6 +117,18 @@ export default async function HomePage() {
             <StateCard key={s.id} state={s} />
           ))}
         </div>
+      </section>
+
+      {/* ===== NATIONAL STATUS MAP ===== */}
+      <section style={statusBlock.section}>
+        <div style={statusBlock.head}>
+          <h2 style={statusBlock.heading}>The West, state by state</h2>
+          <p style={statusBlock.sub}>
+            Three states are mapped end to end so far, with more filling in as we
+            drive them. Tap a lit-up state to head there.
+          </p>
+        </div>
+        <USStatusMap states={states} />
       </section>
 
       {/* ===== NATIONAL MAP ===== */}
@@ -267,4 +280,11 @@ const mapBlock = {
   sub: { fontSize: '1rem', color: COLORS.warmGray, margin: 0, lineHeight: 1.5 },
   legendWrap: { display: 'flex', justifyContent: 'center', marginBottom: '1rem' },
   mapWrap: { maxWidth: '1100px', margin: '0 auto' },
+};
+
+const statusBlock = {
+  section: { padding: 'clamp(3rem, 6vw, 4.5rem) 28px', background: COLORS.paper },
+  head: { textAlign: 'center', maxWidth: '42rem', margin: '0 auto 2rem' },
+  heading: { fontFamily: "'Fraunces', serif", fontSize: 'clamp(24px, 4vw, 34px)', fontWeight: 700, margin: '0 0 0.4rem 0', color: COLORS.ink },
+  sub: { fontSize: '1rem', color: COLORS.warmGray, margin: 0, lineHeight: 1.55 },
 };
