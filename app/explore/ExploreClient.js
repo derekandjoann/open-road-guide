@@ -3,7 +3,6 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { supabase } from '../../lib/supabase';
 import MapView from '../../components/MapView';
 import { getCategoryColor, getCategoryEmoji } from '../../lib/categoryColors';
 import { navLinks, isNavLinkActive } from '../../lib/navLinks';
@@ -123,16 +122,21 @@ export default function ExplorePage({ initialPois = [], initialStateOptions = []
     }
     let cancelled = false;
     const timer = setTimeout(async () => {
-      const { data, error } = await supabase.rpc('search_pois', {
-        search_query: q,
-        max_results: 100,
-      });
+      let data = null;
+      let failed = false;
+      try {
+        const res = await fetch(`/api/data/search?q=${encodeURIComponent(q)}`);
+        if (!res.ok) throw new Error('search ' + res.status);
+        data = await res.json();
+      } catch (err) {
+        console.error('search error:', err);
+        failed = true;
+      }
       if (cancelled) return;
-      if (error) {
-        console.error('search_pois error:', error);
+      if (failed || !Array.isArray(data)) {
         setSearchResults(null); // fall back to substring filtering
       } else {
-        setSearchResults(data || []);
+        setSearchResults(data);
       }
     }, 250);
     return () => {
