@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { navLinks, isNavLinkActive } from '../lib/navLinks';
-import { supabase } from '../lib/supabase';
 
 // Cream nav — the original, kept verbatim for MOBILE on every page so the phone
 // experience is unchanged (the explore page still pins its sticky map under the
@@ -171,13 +170,17 @@ export default function Nav() {
   useEffect(() => {
     let active = true;
     async function load() {
-      const { data } = await supabase
-        .from('states')
-        .select('slug, name, status, sort_order')
-        .eq('published', true)
-        .eq('status', 'live')
-        .order('sort_order', { ascending: true });
-      if (active && data) setStates(data);
+      // Reads our own /api/states route instead of Supabase directly, so no
+      // database credential is ever shipped to the browser. Same live
+      // behaviour: add a state in the DB and it appears here within ~5 min.
+      try {
+        const res = await fetch('/api/states');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (active && Array.isArray(data)) setStates(data);
+      } catch {
+        // Nav renders fine without the switcher if this call fails.
+      }
     }
     load();
     return () => { active = false; };
