@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { supabase } from '../../lib/supabase';
 import { getCategoryColor, getCategoryEmoji } from '../../lib/categoryColors';
 
 // Regions carry no category; give each a stable color by cycling the brand palette.
@@ -111,19 +110,23 @@ export default function MapPage() {
     let cancelled = false;
     (async () => {
       try {
-        const [poiR, routeR, regionR, regionPoiR, storyR, storyPoiR, markerR] = await Promise.all([
-          supabase.from('pois').select('id,slug,name,latitude,longitude,category,tagline,thumbnail_url').eq('published', true),
-          supabase.from('routes').select('slug,name,total_miles,short_description,path_geojson').eq('published', true),
-          supabase.from('regions').select('id,slug,name,short_description,bounds').eq('published', true),
-          supabase.from('region_pois').select('region_id,poi_id'),
-          supabase.from('stories').select('id,slug,title,story_type,excerpt').eq('published', true),
-          supabase.from('story_pois').select('story_id,poi_id,sort_order'),
-          // Historical markers: one prebuilt GeoJSON FeatureCollection (single row,
-          // so it clears PostgREST's 1000-row cap for the ~1,500 statewide markers).
-          supabase.rpc('markers_overlay'),
-        ]);
+        // One server-side call assembles all seven overlays. The browser never
+        // holds a database credential; this route can only ever return these
+        // columns, and the CDN caches it so scale costs nothing.
+        const res = await fetch('/api/data/map');
+        if (!res.ok) throw new Error('map-data ' + res.status);
+        const payload = await res.json();
         if (cancelled) return;
-        if (poiR.error) throw poiR.error;
+
+        // Kept in the { data } shape the overlay builders below already expect,
+        // so none of the assembly logic had to change.
+        const poiR = { data: payload.pois || [] };
+        const routeR = { data: payload.routes || [] };
+        const regionR = { data: payload.regions || [] };
+        const regionPoiR = { data: payload.regionPois || [] };
+        const storyR = { data: payload.stories || [] };
+        const storyPoiR = { data: payload.storyPois || [] };
+        const markerR = { data: payload.markers || null };
 
         const pois = poiR.data || [];
         const poiById = new Map(pois.map((p) => [p.id, p]));
@@ -350,9 +353,10 @@ export default function MapPage() {
         placeUserMarker(lng, lat);
         try { map.flyTo({ center: [lng, lat], zoom: 9, duration: 900 }); } catch (e) { /* keep view */ }
         try {
-          const { data: rows, error } = await supabase.rpc('nearme_pois', { user_lat: lat, user_lng: lng, max_results: 8 });
-          if (error) throw error;
-          const list = rows || [];
+          const nearRes = await fetch(`/api/data/nearme?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`);
+          if (!nearRes.ok) throw new Error('nearme ' + nearRes.status);
+          const rows = await nearRes.json();
+          const list = Array.isArray(rows) ? rows : [];
           const src = map.getSource('nearme');
           if (src) src.setData(fc(list
             .filter((r) => r.longitude != null && r.latitude != null)
