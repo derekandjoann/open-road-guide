@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
-import { supabase } from '../../lib/supabase';
 import MapView from '../../components/MapView';
 
 // Open Road Guide brand palette
@@ -71,11 +70,15 @@ export default function MarkersIndexPage({ initialMarkers = [], initialStateOpti
     }
     if (!details[id] && !detailLoading.has(id)) {
       setDetailLoading((prev) => new Set(prev).add(id));
-      const { data } = await supabase
-        .from('markers')
-        .select('description, inscription')
-        .eq('id', id)
-        .maybeSingle();
+      // Single-row read through our own route: no credential in the browser,
+      // and no way to widen this into a dump of the whole markers table.
+      let data = null;
+      try {
+        const res = await fetch(`/api/data/marker/${encodeURIComponent(id)}`);
+        if (res.ok) data = await res.json();
+      } catch {
+        // Falls through to empty strings below, same as a failed query before.
+      }
       setDetails((prev) => ({
         ...prev,
         [id]: {
