@@ -125,7 +125,7 @@ export default function ExplorePage({ initialPois = [], initialStateOptions = []
       let data = null;
       let failed = false;
       try {
-        const res = await fetch(`/api/data/search?q=${encodeURIComponent(q)}`);
+        const res = await fetch(`/api/data?kind=search&q=${encodeURIComponent(q)}`);
         if (!res.ok) throw new Error('search ' + res.status);
         data = await res.json();
       } catch (err) {
