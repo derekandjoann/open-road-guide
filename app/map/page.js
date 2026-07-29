@@ -113,7 +113,7 @@ export default function MapPage() {
         // One server-side call assembles all seven overlays. The browser never
         // holds a database credential; this route can only ever return these
         // columns, and the CDN caches it so scale costs nothing.
-        const res = await fetch('/api/data/map');
+        const res = await fetch('/api/data?kind=map');
         if (!res.ok) throw new Error('map-data ' + res.status);
         const payload = await res.json();
         if (cancelled) return;
@@ -353,7 +353,7 @@ export default function MapPage() {
         placeUserMarker(lng, lat);
         try { map.flyTo({ center: [lng, lat], zoom: 9, duration: 900 }); } catch (e) { /* keep view */ }
         try {
-          const nearRes = await fetch(`/api/data/nearme?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`);
+          const nearRes = await fetch(`/api/data?kind=nearme&lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`);
           if (!nearRes.ok) throw new Error('nearme ' + nearRes.status);
           const rows = await nearRes.json();
           const list = Array.isArray(rows) ? rows : [];
