@@ -74,7 +74,7 @@ export default function MarkersIndexPage({ initialMarkers = [], initialStateOpti
       // and no way to widen this into a dump of the whole markers table.
       let data = null;
       try {
-        const res = await fetch(`/api/data/marker/${encodeURIComponent(id)}`);
+        const res = await fetch(`/api/data?kind=marker&id=${encodeURIComponent(id)}`);
         if (res.ok) data = await res.json();
       } catch {
         // Falls through to empty strings below, same as a failed query before.
