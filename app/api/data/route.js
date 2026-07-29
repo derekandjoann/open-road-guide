@@ -18,8 +18,20 @@ export const dynamic = 'force-dynamic';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const json = (body, status, cache) =>
-  Response.json(body, { status, headers: { 'Cache-Control': cache } });
+// Netlify's CDN keys its cache on the PATH ONLY — the query string is ignored
+// unless Netlify-Vary names the parameters. Caching any response here would
+// therefore serve one kind's payload for every other kind. Everything is
+// no-store until that behaviour is verified in production; the map query is
+// the same seven reads the browser used to make directly, so this is no
+// heavier than the architecture it replaced.
+const json = (body, status) =>
+  Response.json(body, {
+    status,
+    headers: {
+      'Cache-Control': 'no-store',
+      'Netlify-Vary': 'query=kind|q|id|lat|lng',
+    },
+  });
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -38,7 +50,7 @@ export async function GET(request) {
     ]);
 
     // POIs are the spine — without them nothing else can be placed.
-    if (poiR.error) return json({ error: 'map data unavailable' }, 503, 'no-store');
+    if (poiR.error) return json({ error: 'map data unavailable' }, 503);
 
     // Same defensive contract as before: one failed overlay never blanks the rest.
     return json(
@@ -51,9 +63,7 @@ export async function GET(request) {
         storyPois: storyPoiR.error ? [] : storyPoiR.data || [],
         markers: markerR.error ? null : markerR.data || null,
       },
-      200,
-      'public, s-maxage=300, stale-while-revalidate=3600'
-    );
+      200);
   }
 
   // ------------------------------------------------------------- nearme
@@ -64,15 +74,15 @@ export async function GET(request) {
       Number.isFinite(lat) && Number.isFinite(lng) &&
       lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 
-    if (!valid) return json({ error: 'bad coordinates' }, 400, 'no-store');
+    if (!valid) return json({ error: 'bad coordinates' }, 400);
 
     // Capped at 8 server-side so this can't be swept into a bulk export.
     const { data, error } = await supabase.rpc('nearme_pois', {
       user_lat: lat, user_lng: lng, max_results: 8,
     });
-    if (error) return json({ error: 'lookup failed' }, 503, 'no-store');
+    if (error) return json({ error: 'lookup failed' }, 503);
 
-    return json(data || [], 200, 'no-store');
+    return json(data || [], 200);
   }
 
   // ------------------------------------------------------------- search
@@ -81,20 +91,20 @@ export async function GET(request) {
 
     // The 3-character floor and 100-result cap are enforced here, not in the
     // browser, so neither can be bypassed by editing the request.
-    if (q.length < 3) return json([], 200, 'no-store');
+    if (q.length < 3) return json([], 200);
 
     const { data, error } = await supabase.rpc('search_pois', {
       search_query: q, max_results: 100,
     });
-    if (error) return json({ error: 'search failed' }, 503, 'no-store');
+    if (error) return json({ error: 'search failed' }, 503);
 
-    return json(data || [], 200, 'public, s-maxage=60');
+    return json(data || [], 200);
   }
 
   // ------------------------------------------------------------- marker
   if (kind === 'marker') {
     const id = searchParams.get('id') || '';
-    if (!UUID.test(id)) return json({ error: 'bad id' }, 400, 'no-store');
+    if (!UUID.test(id)) return json({ error: 'bad id' }, 400);
 
     // Single row only — there is no way to widen this into a table dump.
     const { data, error } = await supabase
@@ -102,14 +112,12 @@ export async function GET(request) {
       .select('description, inscription')
       .eq('id', id)
       .maybeSingle();
-    if (error) return json({ error: 'lookup failed' }, 503, 'no-store');
+    if (error) return json({ error: 'lookup failed' }, 503);
 
     return json(
       { description: data?.description || '', inscription: data?.inscription || '' },
-      200,
-      'public, s-maxage=3600'
-    );
+      200);
   }
 
-  return json({ error: 'unknown kind' }, 404, 'no-store');
+  return json({ error: 'unknown kind' }, 404);
 }
