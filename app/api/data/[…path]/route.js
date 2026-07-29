@@ -1,15 +1,16 @@
-import { supabase } from '../../../../lib/supabase';
+import { supabase } from '../../../lib/supabase';
 
 // One server-side data route for everything the interactive pages need.
 //
-// All four endpoints live in this single catch-all file on purpose: each one is
-// a thin, fixed query, and keeping them together means one folder to create and
-// one file to upload instead of four near-identical ones.
+// Endpoints are selected by the `kind` query parameter rather than by path
+// segments. That is deliberate: it keeps this file at a plain folder path
+// (app/api/data/) with no brackets or dots in the name, which iOS Smart
+// Punctuation silently rewrites.
 //
-//   /api/data/map                     → every overlay the /map page draws
-//   /api/data/nearme?lat=&lng=        → 8 nearest published POIs
-//   /api/data/search?q=               → POI search
-//   /api/data/marker/<uuid>           → one marker's long text
+//   /api/data?kind=map                  → every overlay the /map page draws
+//   /api/data?kind=nearme&lat=&lng=     → 8 nearest published POIs
+//   /api/data?kind=search&q=            → POI search
+//   /api/data?kind=marker&id=<uuid>     → one marker's long text
 //
 // Nothing here accepts a table name, a column list, or a row limit from the
 // caller. The shapes below are the only shapes this route can ever return.
@@ -20,14 +21,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const json = (body, status, cache) =>
   Response.json(body, { status, headers: { 'Cache-Control': cache } });
 
-export async function GET(request, { params }) {
-  const { path } = await params;
-  const segments = Array.isArray(path) ? path : [];
-  const endpoint = segments[0] || '';
+export async function GET(request) {
   const { searchParams } = new URL(request.url);
+  const kind = searchParams.get('kind') || '';
 
   // ---------------------------------------------------------------- map
-  if (endpoint === 'map' && segments.length === 1) {
+  if (kind === 'map') {
     const [poiR, routeR, regionR, regionPoiR, storyR, storyPoiR, markerR] = await Promise.all([
       supabase.from('pois').select('id,slug,name,latitude,longitude,category,tagline,thumbnail_url').eq('published', true),
       supabase.from('routes').select('slug,name,total_miles,short_description,path_geojson').eq('published', true),
@@ -58,7 +57,7 @@ export async function GET(request, { params }) {
   }
 
   // ------------------------------------------------------------- nearme
-  if (endpoint === 'nearme' && segments.length === 1) {
+  if (kind === 'nearme') {
     const lat = Number(searchParams.get('lat'));
     const lng = Number(searchParams.get('lng'));
     const valid =
@@ -77,7 +76,7 @@ export async function GET(request, { params }) {
   }
 
   // ------------------------------------------------------------- search
-  if (endpoint === 'search' && segments.length === 1) {
+  if (kind === 'search') {
     const q = (searchParams.get('q') || '').trim().slice(0, 120);
 
     // The 3-character floor and 100-result cap are enforced here, not in the
@@ -93,8 +92,8 @@ export async function GET(request, { params }) {
   }
 
   // ------------------------------------------------------------- marker
-  if (endpoint === 'marker' && segments.length === 2) {
-    const id = segments[1];
+  if (kind === 'marker') {
+    const id = searchParams.get('id') || '';
     if (!UUID.test(id)) return json({ error: 'bad id' }, 400, 'no-store');
 
     // Single row only — there is no way to widen this into a table dump.
@@ -112,5 +111,5 @@ export async function GET(request, { params }) {
     );
   }
 
-  return json({ error: 'not found' }, 404, 'no-store');
+  return json({ error: 'unknown kind' }, 404, 'no-store');
 }
