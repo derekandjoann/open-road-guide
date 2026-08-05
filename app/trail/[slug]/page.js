@@ -233,7 +233,7 @@ export default async function TrailPage({ params }) {
       {/* Hero image (renders fine without one) */}
       {trail.hero_image_url && (
         <figure style={styles.heroFigure}>
-          <img src={heroSrc(trail.hero_image_url)} alt={trail.title} style={styles.heroImage} loading="eager" />
+          <img src={heroSrc(trail.hero_image_url)} alt={trail.hero_image_alt || trail.title} style={styles.heroImage} loading="eager" />
           {trail.hero_image_credit && (
             <figcaption style={styles.heroCredit}>{trail.hero_image_credit}</figcaption>
           )}
