@@ -371,7 +371,7 @@ export default async function RoutePage({ params }) {
         <figure style={styles.heroFigure}>
           <img
             src={heroSrc(route.hero_image_url)}
-            alt={route.name}
+            alt={route.hero_image_alt || route.name}
             style={styles.heroImage}
             loading="eager"
           />
