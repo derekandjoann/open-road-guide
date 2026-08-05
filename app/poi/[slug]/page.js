@@ -529,7 +529,7 @@ export default async function PoiDetailPage({ params }) {
           <div style={{ position: 'relative', width: '100%', maxWidth: '1100px' }}>
             <img
               src={heroImageSrc(poi.thumbnail_url)}
-              alt={poi.name}
+              alt={poi.thumbnail_alt || poi.name}
               loading="eager"
               style={{
                 display: 'block',
