@@ -310,7 +310,7 @@ export default async function ItineraryPage({ params }) {
         <figure style={styles.heroFigure}>
           <img
             src={heroSrc(itin.hero_image_url)}
-            alt={itin.title}
+            alt={itin.hero_image_alt || itin.title}
             style={styles.heroImage}
             loading="eager"
           />
