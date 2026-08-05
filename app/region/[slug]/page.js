@@ -179,7 +179,7 @@ export default async function RegionPage({ params }) {
   const { data: poiData } = await supabase
     .from('region_pois')
     .select(
-      'poi:pois(id, name, slug, tagline, nearest_city, nearest_highway, category, thumbnail_url, published)'
+      'poi:pois(id, name, slug, tagline, nearest_city, nearest_highway, category, thumbnail_url, thumbnail_alt, published)'
     )
     .eq('region_id', region.id);
 
@@ -335,7 +335,7 @@ export default async function RegionPage({ params }) {
           <figure style={styles.heroFigure}>
             <img
               src={heroSrc(region.hero_image_url)}
-              alt={region.name}
+              alt={region.hero_image_alt || region.name}
               style={styles.heroImage}
               loading="eager"
             />
@@ -395,7 +395,7 @@ export default async function RegionPage({ params }) {
                       {place.thumbnail_url && (
                         <img
                           src={heroSrc(place.thumbnail_url, 600)}
-                          alt={place.name}
+                          alt={place.thumbnail_alt || place.name}
                           loading="lazy"
                           style={styles.placeThumb}
                         />
