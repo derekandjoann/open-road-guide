@@ -37,6 +37,50 @@ function heroSrc(url, width = 1600) {
   return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
 }
 
+// Shortest distance in miles from a point to the route's traced line.
+// routes.path_geojson is a bare [[lng, lat], ...] array, so this walks the
+// segments and takes the minimum perpendicular distance. Segments are short
+// (a few hundred metres), so an equirectangular projection centred on the
+// point is accurate to well under one percent at these scales — and its only
+// job is to decide whether a stop is far enough off the road to say so.
+function offRouteMiles(line, lat, lng) {
+  if (!Array.isArray(line) || line.length < 2) return null;
+  if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+  const R = 3958.7613; // Earth's mean radius, miles
+  const toRad = Math.PI / 180;
+  const cosLat = Math.cos(lat * toRad);
+  const px = lng * cosLat;
+  const py = lat;
+  let best = Infinity;
+  for (let i = 1; i < line.length; i += 1) {
+    const a = line[i - 1];
+    const b = line[i];
+    if (!Array.isArray(a) || !Array.isArray(b)) continue;
+    const ax = a[0] * cosLat;
+    const ay = a[1];
+    const dx = b[0] * cosLat - ax;
+    const dy = b[1] - ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / len2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const ex = (px - (ax + t * dx)) * toRad;
+    const ey = (py - (ay + t * dy)) * toRad;
+    const d = Math.sqrt(ex * ex + ey * ey) * R;
+    if (d < best) best = d;
+  }
+  return Number.isFinite(best) ? best : null;
+}
+
+// A stop this far off the traced road stops being a waypoint and starts being
+// a detour, and the page says so rather than letting a reader plan around it
+// unwarned. The threshold matches the off-corridor guard on the
+// routes_stops_misordered verification lane, so the page and the database
+// check answer to the same number.
+const DETOUR_MIN_MILES = 2;
+
+const detourLabel = (mi) =>
+  mi >= 10 ? `${Math.round(mi)} miles off the route` : `${mi.toFixed(1)} miles off the route`;
+
 // Open Road Guide brand palette
 const COLORS = {
   coral: '#FF6B6B',
@@ -227,6 +271,21 @@ export default async function RoutePage({ params }) {
     longitude: s.longitude,
     visit_duration: s.visit_duration,
   }));
+
+  // How far each stop sits from the road it is listed on. Some genuinely good
+  // stops are real detours — Parowan Gap is 23 miles off a 20-mile connector —
+  // and the honest thing is to keep them and print the distance, not to drop
+  // them or to let the list imply they are on the way.
+  const stopsOnPage = stops.map((s) => ({
+    ...s,
+    off_mi: hasRouteLine
+      ? offRouteMiles(route.path_geojson, s.latitude, s.longitude)
+      : null,
+  }));
+
+  const detourCount = stopsOnPage.filter(
+    (s) => s.off_mi != null && s.off_mi >= DETOUR_MIN_MILES
+  ).length;
 
   // Split description into paragraphs
   const paragraphs = (route.description || '')
@@ -421,11 +480,20 @@ export default async function RoutePage({ params }) {
         <p style={styles.stopsSub}>
           {stops.length} stops along the route, in driving order from{' '}
           {route.start_location} to {route.end_location}.
+          {detourCount > 0 && (
+            <>
+              {' '}
+              {detourCount === 1 ? 'One of them sits' : `${detourCount} of them sit`}{' '}
+              off the road itself — the distance is noted on each.
+            </>
+          )}
         </p>
 
         <ol style={styles.stopsList}>
-          {stops.map((stop, idx) => {
-            const isLast = idx === stops.length - 1;
+          {stopsOnPage.map((stop, idx) => {
+            const isLast = idx === stopsOnPage.length - 1;
+            const isDetour =
+              stop.off_mi != null && stop.off_mi >= DETOUR_MIN_MILES;
             return (
               <li key={stop.id} style={styles.stopItem}>
                 <div style={styles.stopMarkerCol}>
@@ -443,6 +511,11 @@ export default async function RoutePage({ params }) {
                         <div style={styles.stopCity}>{stop.nearest_city}</div>
                       )}
                     </div>
+                    {isDetour && (
+                      <div style={styles.stopDetour}>
+                        {detourLabel(stop.off_mi)}
+                      </div>
+                    )}
                     {stop.route_notes ? (
                       <p style={styles.stopNotes}>{stop.route_notes}</p>
                     ) : stop.tagline ? (
@@ -812,6 +885,13 @@ const styles = {
     letterSpacing: '0.06em',
     fontWeight: 600,
     flexShrink: 0,
+  },
+  stopDetour: {
+    fontSize: '0.78rem',
+    color: COLORS.coral,
+    fontWeight: 600,
+    letterSpacing: '0.02em',
+    marginTop: '0.35rem',
   },
   stopNotes: {
     fontSize: '0.98rem',
