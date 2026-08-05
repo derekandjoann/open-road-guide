@@ -163,7 +163,7 @@ function StateCard({ state }) {
         {state.hero_image_url ? (
           <img
             src={heroSrc(state.hero_image_url, 800)}
-            alt={state.name}
+            alt={state.hero_image_alt || state.name}
             loading="lazy"
             style={{ ...card.image, filter: comingSoon ? 'grayscale(0.7) brightness(0.8)' : 'none' }}
           />
