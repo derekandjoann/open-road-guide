@@ -243,7 +243,7 @@ export default async function StateHubPage({ params }) {
         <figure style={styles.heroFigure}>
           <img
             src={heroSrc(state.hero_image_url)}
-            alt={name}
+            alt={state.hero_image_alt || name}
             style={styles.heroImage}
             loading="eager"
           />
