@@ -555,7 +555,7 @@ export default async function PoiDetailPage({ params }) {
                 borderRadius: '4px',
                 letterSpacing: '0.01em',
               }}>
-                {poi.thumbnail_credit}
+                {parseInlineLinks(poi.thumbnail_credit)}
               </span>
             )}
           </div>
