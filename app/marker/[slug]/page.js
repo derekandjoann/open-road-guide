@@ -181,6 +181,20 @@ export default async function MarkerPage({ params }) {
     .map((b) => b.trim())
     .filter(Boolean);
 
+  // Some sites carry more than one plaque, and where they disagree we carry
+  // every text rather than ranking them. Those inscriptions label each bronze
+  // with a bracketed line of its own — "[Chimney Rock — the state plaque,
+  // placed 1986]". Two or more such labels means the heading below has to be
+  // plural. Deliberately keyed to labels naming a *plaque*, so that a single
+  // monument transcribed face by face ("[front panel]", "[back panel]") stays
+  // singular, which is correct: that is one plaque with two sides.
+  const plaqueLabelCount = (
+    (marker.inscription || '').match(/^\[[^\]]*plaque[^\]]*\]/gim) || []
+  ).length;
+
+  const inscriptionHeading =
+    plaqueLabelCount >= 2 ? 'What the plaques say' : 'What the plaque says';
+
   // ---------- Structured data (JSON-LD) ----------
   // Ships in the server-rendered HTML. A TouristAttraction describes the
   // marker site (with geo + locality where we have them); a BreadcrumbList
@@ -283,7 +297,7 @@ export default async function MarkerPage({ params }) {
       {/* The plaque's own text */}
       {marker.inscription && (
         <section style={styles.section}>
-          <h2 style={styles.sectionHeading}>What the plaque says</h2>
+          <h2 style={styles.sectionHeading}>{inscriptionHeading}</h2>
           <blockquote style={styles.inscription}>{marker.inscription}</blockquote>
         </section>
       )}
