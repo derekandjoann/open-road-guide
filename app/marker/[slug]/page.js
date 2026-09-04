@@ -70,6 +70,27 @@ function fmtMiles(mi) {
   return `${Math.round(mi)} mi`;
 }
 
+// The placement block is transcribed off the plaque and routinely ends in its
+// own date — "…Squibob Chapter, E Clampus Vitus, May 3, 1986" — so appending
+// year_erected printed the year twice. Print the year only when the placer
+// line does not already state it, and never lead with a bare comma when there
+// is no placer at all. The stored text is the bronze's own words and is not
+// edited to suit this line.
+function formatErected(erectedBy, yearErected) {
+  const by = String(erectedBy || '')
+    .trim()
+    .replace(/[,;]+$/, '');
+  const yr = String(yearErected || '').trim();
+
+  if (!by) return yr ? `Erected ${yr}` : null;
+  if (!yr) return `Erected by ${by}`;
+
+  const alreadyStated =
+    /^\d{3,4}$/.test(yr) && new RegExp(`(?:^|\\D)${yr}(?:\\D|$)`).test(by);
+
+  return alreadyStated ? `Erected by ${by}` : `Erected by ${by}, ${yr}`;
+}
+
 // Server-rendered metadata: real per-marker <title>/<meta>/Open Graph tags
 // and canonical, shipped in the initial HTML for crawlers.
 export async function generateMetadata({ params }) {
@@ -120,6 +141,7 @@ export default async function MarkerPage({ params }) {
   ]
     .filter(Boolean)
     .join(', ');
+  const erectedText = formatErected(marker.erected_by, marker.year_erected);
 
   // ---------- Nearby content ----------
   // A bounding box (~25 miles each way) narrows the candidates; exact
@@ -276,13 +298,7 @@ export default async function MarkerPage({ params }) {
             {marker.state}
           </Link>
         </div>
-        {(marker.erected_by || marker.year_erected) && (
-          <div style={styles.erectedLine}>
-            Erected
-            {marker.erected_by ? ` by ${marker.erected_by}` : ''}
-            {marker.year_erected ? `, ${marker.year_erected}` : ''}
-          </div>
-        )}
+        {erectedText && <div style={styles.erectedLine}>{erectedText}</div>}
       </header>
 
       {/* The editorial description — the reason this page exists */}
