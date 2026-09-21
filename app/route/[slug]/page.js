@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
 import MapView from '../../../components/MapView';
+import { heroImage, hasHeroImage } from '../../../lib/images';
 
 // Render every route on demand (server-side) rather than statically at build
 // time, matching the POI page. Route descriptions and route_pois editorial
@@ -22,20 +23,6 @@ const toSlug = (s) =>
     .replace(/[^\w\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-') || '';
-
-// Serve a right-sized, optimized hero from Supabase's image render endpoint
-// instead of the multi-megabyte original (e.g. a 7.6 MB JPEG comes down to
-// ~0.5 MB at width 1600). Falls back to the original URL untouched if it isn't
-// in the expected public-object form, so a non-Supabase URL still works.
-function heroSrc(url, width = 1600) {
-  if (!url) return '';
-  if (!url.includes('/storage/v1/object/public/')) return url;
-  const base = url.replace(
-    '/storage/v1/object/public/',
-    '/storage/v1/render/image/public/'
-  );
-  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
-}
 
 // Shortest distance in miles from a point to the route's traced line.
 // routes.path_geojson is a bare [[lng, lat], ...] array, so this walks the
@@ -151,7 +138,7 @@ export async function generateMetadata({ params }) {
 
   const { data: route } = await supabase
     .from('routes')
-    .select('name, seo_title, meta_description, short_description, hero_image_url')
+    .select('name, seo_title, meta_description, short_description, hero_image_url, hero_image_public_id')
     .eq('slug', slug)
     .eq('published', true)
     .maybeSingle();
@@ -176,7 +163,7 @@ export async function generateMetadata({ params }) {
       description,
       type: 'article',
       url,
-      ...(route.hero_image_url ? { images: [heroSrc(route.hero_image_url, 1200)] } : {}),
+      ...(hasHeroImage(route) ? { images: [heroImage(route, 1200)] } : {}),
     },
   };
 }
@@ -210,7 +197,7 @@ export default async function RoutePage({ params }) {
   const { data: stopData } = await supabase
     .from('route_pois')
     .select(
-      'order_index, notes, poi:pois(id, name, slug, tagline, description, nearest_city, nearest_highway, category, thumbnail_url, published, latitude, longitude, visit_duration)'
+      'order_index, notes, poi:pois(id, name, slug, tagline, description, nearest_city, nearest_highway, category, thumbnail_url, thumbnail_public_id, published, latitude, longitude, visit_duration)'
     )
     .eq('route_id', route.id)
     .order('order_index', { ascending: true });
@@ -240,7 +227,7 @@ export default async function RoutePage({ params }) {
   const { data: storyRows } = await supabase
     .from('story_routes')
     .select(
-      'story:stories(id, slug, title, story_type, hero_image_url, hero_image_alt, reading_time_minutes, author_name, published, published_at, created_at)'
+      'story:stories(id, slug, title, story_type, hero_image_url, hero_image_public_id, hero_image_alt, reading_time_minutes, author_name, published, published_at, created_at)'
     )
     .eq('route_id', route.id);
 
@@ -367,10 +354,10 @@ export default async function RoutePage({ params }) {
       </nav>
 
       {/* Hero image banner */}
-      {route.hero_image_url && (
+      {hasHeroImage(route) && (
         <figure style={styles.heroFigure}>
           <img
-            src={heroSrc(route.hero_image_url)}
+            src={heroImage(route)}
             alt={route.hero_image_alt || route.name}
             style={styles.heroImage}
             loading="eager"
@@ -576,14 +563,11 @@ export default async function RoutePage({ params }) {
                 href={`/story/${story.slug}`}
                 style={styles.storyCard}
               >
-                {story.hero_image_url ? (
+                {hasHeroImage(story) ? (
                   <div
                     style={{
                       ...styles.storyThumb,
-                      background: `#f0ebe4 url(${heroSrc(
-                        story.hero_image_url,
-                        320
-                      )}) center/cover no-repeat`,
+                      background: `#f0ebe4 url(${heroImage(story, 320)}) center/cover no-repeat`,
                     }}
                     role="img"
                     aria-label={story.hero_image_alt || story.title}

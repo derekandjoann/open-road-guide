@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
 import { notFound } from 'next/navigation';
 import ItineraryDriveMap from '../../../components/ItineraryDriveMap';
+import { heroImage, hasHeroImage } from '../../../lib/images';
 
 // Render every itinerary on demand (server-side) rather than statically at
 // build time — same rationale as the POI and marker pages: the prose lives in
@@ -32,18 +33,6 @@ const COLORS = {
   paper: '#FFF8F0',
   warmGray: '#666',
 };
-
-// Serve a right-sized hero from Supabase's render endpoint instead of the
-// multi-megabyte original. Falls back untouched for non-Supabase URLs.
-function heroSrc(url, width = 1600) {
-  if (!url) return '';
-  if (!url.includes('/storage/v1/object/public/')) return url;
-  const base = url.replace(
-    '/storage/v1/object/public/',
-    '/storage/v1/render/image/public/'
-  );
-  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
-}
 
 // Flatten markdown-ish prose to plain text for JSON-LD and meta descriptions:
 // [label](href) -> label, **bold** -> bold, collapse whitespace.
@@ -126,7 +115,7 @@ export async function generateMetadata({ params }) {
 
   const itin = await fetchItinerary(
     slug,
-    'title, subtitle, seo_title, meta_description, intro, hero_image_url'
+    'title, subtitle, seo_title, meta_description, intro, hero_image_url, hero_image_public_id'
   );
 
   if (!itin) {
@@ -149,7 +138,7 @@ export async function generateMetadata({ params }) {
       description,
       type: 'article',
       url,
-      ...(itin.hero_image_url ? { images: [heroSrc(itin.hero_image_url, 1200)] } : {}),
+      ...(hasHeroImage(itin) ? { images: [heroImage(itin, 1200)] } : {}),
     },
   };
 }
@@ -249,8 +238,8 @@ export default async function ItineraryPage({ params }) {
       itin.meta_description || itin.subtitle || toPlainText(itin.intro).slice(0, 500),
     url: pageUrl,
   };
-  if (itin.hero_image_url) {
-    tripLd.image = itin.hero_image_url;
+  if (hasHeroImage(itin)) {
+    tripLd.image = heroImage(itin, 1600);
   }
   if (days.length > 0) {
     tripLd.itinerary = {
@@ -306,10 +295,10 @@ export default async function ItineraryPage({ params }) {
       </nav>
 
       {/* Hero image */}
-      {itin.hero_image_url && (
+      {hasHeroImage(itin) && (
         <figure style={styles.heroFigure}>
           <img
-            src={heroSrc(itin.hero_image_url)}
+            src={heroImage(itin)}
             alt={itin.hero_image_alt || itin.title}
             style={styles.heroImage}
             loading="eager"

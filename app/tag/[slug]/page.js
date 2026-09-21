@@ -121,7 +121,7 @@ export default async function TagPage({ params }) {
   const { data: pairs } = await supabase
     .from('poi_tags')
     .select(
-      'poi:pois(id, name, slug, tagline, description, nearest_highway, nearest_city, category, thumbnail_url, published)'
+      'poi:pois(id, name, slug, tagline, description, nearest_highway, nearest_city, category, thumbnail_url, thumbnail_public_id, published)'
     )
     .eq('tag_id', tag.id);
 

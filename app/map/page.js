@@ -5,6 +5,7 @@ import Link from 'next/link';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { getCategoryColor, getCategoryEmoji } from '../../lib/categoryColors';
+import { thumbImage, hasThumbImage } from '../../lib/images';
 
 // Regions carry no category; give each a stable color by cycling the brand palette.
 const REGION_PALETTE = ['#ff6b5b', '#12b5a0', '#ffb627', '#7c5cfc', '#f59e0b'];
@@ -137,7 +138,7 @@ export default function MapPage() {
           .map((p) => ({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: [p.longitude, p.latitude] },
-            properties: { kind: 'poi', slug: p.slug, name: p.name, category: p.category || '', tagline: p.tagline || '', color: getCategoryColor(p.category), thumb: p.thumbnail_url || '' },
+            properties: { kind: 'poi', slug: p.slug, name: p.name, category: p.category || '', tagline: p.tagline || '', color: getCategoryColor(p.category), thumb: thumbImage(p, 160) },
           }));
 
         // Routes
@@ -588,8 +589,8 @@ function nearmeSheet(close, list) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '46dvh', overflowY: 'auto', margin: '10px 0 0' }}>
             {list.map((r) => (
               <Link key={r.slug} href={`/poi/${r.slug}`} style={{ display: 'flex', gap: 11, alignItems: 'center', textDecoration: 'none', color: 'inherit', background: '#f9f7f1', border: '1px solid #ece9e2', borderRadius: 13, padding: 8 }}>
-                {r.thumbnail_url
-                  ? <img src={r.thumbnail_url} alt="" style={{ width: 54, height: 54, borderRadius: 9, objectFit: 'cover', flex: '0 0 auto' }} />
+                {hasThumbImage(r)
+                  ? <img src={thumbImage(r, 160)} alt="" style={{ width: 54, height: 54, borderRadius: 9, objectFit: 'cover', flex: '0 0 auto' }} />
                   : <div style={{ width: 54, height: 54, borderRadius: 9, background: getCategoryColor(r.category), flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>{getCategoryEmoji(r.category)}</div>}
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 15.5, lineHeight: 1.15, color: '#1a1a2e' }}>{r.name}</div>

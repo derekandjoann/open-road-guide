@@ -3,6 +3,7 @@ import { getCategoryColor, getCategoryEmoji } from '../../../lib/categoryColors'
 import { toSlug } from '../../../lib/slug';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
 import PoiMap from './PoiMap';
+import { heroImage, hasHeroImage, thumbImage, hasThumbImage } from '../../../lib/images';
 
 // Render every POI on demand (server-side) rather than statically at build
 // time. This is deliberate: POI prose lives in Supabase and is edited
@@ -51,21 +52,6 @@ function toPlainText(md) {
     .replace(/[#*_>`]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-// Build a transformed image URL for the POI hero band. Rewrites a Supabase
-// public-object URL to the on-the-fly render/image endpoint and requests a
-// width-bounded, contained render. resize=contain + height:'auto' on the <img>
-// avoids the double-crop zoom that aspectRatio+cover produces. A non-Supabase
-// URL (or anything not in the expected public-object form) is returned as-is.
-function heroImageSrc(url, width = 1600) {
-  if (!url) return null;
-  if (!url.includes('/storage/v1/object/public/')) return url;
-  const base = url.replace(
-    '/storage/v1/object/public/',
-    '/storage/v1/render/image/public/'
-  );
-  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
 }
 
 // Fetch a single published POI by its database slug (fast path), falling back
@@ -208,6 +194,7 @@ export default async function PoiDetailPage({ params }) {
           excerpt,
           story_type,
           hero_image_url,
+          hero_image_public_id,
           hero_image_alt,
           reading_time_minutes,
           author_name,
@@ -518,7 +505,7 @@ export default async function PoiDetailPage({ params }) {
           no objectFit cover / fixed aspectRatio) — that combination is what
           avoids the double-crop zoom. Centered on a dark band so a portrait
           frame letterboxes cleanly instead of cropping. */}
-      {poi.thumbnail_url && (
+      {hasThumbImage(poi) && (
         <section style={{
           width: '100%',
           background: '#0f0f1a',
@@ -528,7 +515,7 @@ export default async function PoiDetailPage({ params }) {
         }}>
           <div style={{ position: 'relative', width: '100%', maxWidth: '1100px' }}>
             <img
-              src={heroImageSrc(poi.thumbnail_url)}
+              src={thumbImage(poi, 1600)}
               alt={poi.thumbnail_alt || poi.name}
               loading="eager"
               style={{
@@ -976,11 +963,11 @@ export default async function PoiDetailPage({ params }) {
                   }}
                 >
                   {/* Image or coral fallback block */}
-                  {story.hero_image_url ? (
+                  {hasHeroImage(story) ? (
                     <div style={{
                       width: '110px',
                       flexShrink: 0,
-                      background: `#f0ebe4 url(${story.hero_image_url}) center/cover no-repeat`,
+                      background: `#f0ebe4 url(${heroImage(story, 320)}) center/cover no-repeat`,
                     }}
                     role="img"
                     aria-label={story.hero_image_alt || story.title}
@@ -1020,7 +1007,7 @@ export default async function PoiDetailPage({ params }) {
                     minWidth: 0,
                     flex: 1,
                   }}>
-                    {story.story_type && story.hero_image_url && (
+                    {story.story_type && hasHeroImage(story) && (
                       <div style={{
                         fontSize: '10px',
                         fontWeight: 700,

@@ -7,19 +7,7 @@ import MapView from '../../components/MapView';
 import { getCategoryColor, getCategoryEmoji } from '../../lib/categoryColors';
 import { navLinks, isNavLinkActive } from '../../lib/navLinks';
 import { toSlug } from '../../lib/slug'; 
-
-// Serve a small, right-sized thumbnail from Supabase's image render endpoint
-// rather than the multi-megabyte original. Falls back to the original URL
-// untouched if it isn't in the expected public-object form.
-function thumbSrc(url, width = 160) {
-  if (!url) return '';
-  if (!url.includes('/storage/v1/object/public/')) return url;
-  const base = url.replace(
-    '/storage/v1/object/public/',
-    '/storage/v1/render/image/public/'
-  );
-  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
-}
+import { thumbImage, hasThumbImage } from '../../lib/images';
 
 // Desktop consolidated-header tab styles. On /explore the section nav lives in
 // the dark bar (Nav.js returns null there at desktop width), so these mirror the
@@ -742,9 +730,9 @@ function PoiCard({ poi, isSelected, isMobile, controlsH = 0, onClick }) {
       }}
     >
       <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-        {poi.thumbnail_url && (
+        {hasThumbImage(poi) && (
           <img
-            src={thumbSrc(poi.thumbnail_url)}
+            src={thumbImage(poi, 160)}
             alt={poi.name}
             loading="lazy"
             style={{

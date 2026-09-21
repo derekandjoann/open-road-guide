@@ -3,21 +3,12 @@ import { createClient } from '@supabase/supabase-js';
 import MapView from '../components/MapView';
 import MapLegend from '../components/MapLegend';
 import USStatusMap from '../components/USStatusMap';
+import { heroImage, hasHeroImage } from '../lib/images';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
-
-function heroSrc(url, width = 1200) {
-  if (!url) return '';
-  if (!url.includes('/storage/v1/object/public/')) return url;
-  const base = url.replace(
-    '/storage/v1/object/public/',
-    '/storage/v1/render/image/public/'
-  );
-  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
-}
 
 const COLORS = {
   coral: '#FF6B6B',
@@ -160,9 +151,9 @@ function StateCard({ state }) {
   const inner = (
     <>
       <div style={card.imageWrap}>
-        {state.hero_image_url ? (
+        {hasHeroImage(state) ? (
           <img
-            src={heroSrc(state.hero_image_url, 800)}
+            src={heroImage(state, 800)}
             alt={state.hero_image_alt || state.name}
             loading="lazy"
             style={{ ...card.image, filter: comingSoon ? 'grayscale(0.7) brightness(0.8)' : 'none' }}

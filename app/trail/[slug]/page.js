@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
 import { notFound } from 'next/navigation';
 import MapView from '../../../components/MapView';
+import { heroImage, hasHeroImage } from '../../../lib/images';
 
 // Render every trail on demand (server-side) rather than statically at build
 // time — same rationale as the itinerary, POI, and marker pages: the prose
@@ -28,18 +29,6 @@ const COLORS = {
 // A trail carries its own accent (violet) to set it apart from itineraries
 // (yellow), scenic drives (teal), and stories (coral).
 const ACCENT = COLORS.violet;
-
-// Serve a right-sized hero from Supabase's render endpoint instead of the
-// multi-megabyte original. Falls back untouched for non-Supabase URLs.
-function heroSrc(url, width = 1600) {
-  if (!url) return '';
-  if (!url.includes('/storage/v1/object/public/')) return url;
-  const base = url.replace(
-    '/storage/v1/object/public/',
-    '/storage/v1/render/image/public/'
-  );
-  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
-}
 
 // Flatten markdown-ish prose to plain text for JSON-LD and meta descriptions.
 function toPlainText(md) {
@@ -110,7 +99,7 @@ export async function generateMetadata({ params }) {
 
   const trail = await fetchTrail(
     slug,
-    'title, subtitle, seo_title, meta_description, body, hero_image_url'
+    'title, subtitle, seo_title, meta_description, body, hero_image_url, hero_image_public_id'
   );
 
   if (!trail) {
@@ -131,7 +120,7 @@ export async function generateMetadata({ params }) {
       description,
       type: 'article',
       url,
-      ...(trail.hero_image_url ? { images: [heroSrc(trail.hero_image_url, 1200)] } : {}),
+      ...(hasHeroImage(trail) ? { images: [heroImage(trail, 1200)] } : {}),
     },
   };
 }
@@ -231,9 +220,9 @@ export default async function TrailPage({ params }) {
       </nav>
 
       {/* Hero image (renders fine without one) */}
-      {trail.hero_image_url && (
+      {hasHeroImage(trail) && (
         <figure style={styles.heroFigure}>
-          <img src={heroSrc(trail.hero_image_url)} alt={trail.hero_image_alt || trail.title} style={styles.heroImage} loading="eager" />
+          <img src={heroImage(trail)} alt={trail.hero_image_alt || trail.title} style={styles.heroImage} loading="eager" />
           {trail.hero_image_credit && (
             <figcaption style={styles.heroCredit}>{trail.hero_image_credit}</figcaption>
           )}

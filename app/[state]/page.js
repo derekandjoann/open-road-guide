@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import MapView from '../../components/MapView';
 import MapLegend from '../../components/MapLegend';
 import { notFound } from 'next/navigation';
+import { heroImage, hasHeroImage } from '../../lib/images';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -16,18 +17,6 @@ const toSlug = (s) =>
     .replace(/[^\w\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-') || '';
-
-// Serve a right-sized hero from Supabase's render endpoint instead of the
-// multi-megabyte original. Falls back untouched for non-Supabase URLs.
-function heroSrc(url, width = 1600) {
-  if (!url) return '';
-  if (!url.includes('/storage/v1/object/public/')) return url;
-  const base = url.replace(
-    '/storage/v1/object/public/',
-    '/storage/v1/render/image/public/'
-  );
-  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
-}
 
 // Open Road Guide brand palette
 const COLORS = {
@@ -65,7 +54,7 @@ export async function generateMetadata({ params }) {
 
   const { data: state } = await supabase
     .from('states')
-    .select('name, tagline, hero_image_url')
+    .select('name, tagline, hero_image_url, hero_image_public_id')
     .eq('slug', stateSlug)
     .eq('published', true)
     .maybeSingle();
@@ -89,7 +78,7 @@ export async function generateMetadata({ params }) {
       description,
       type: 'website',
       url,
-      ...(state.hero_image_url ? { images: [heroSrc(state.hero_image_url, 1200)] } : {}),
+      ...(hasHeroImage(state) ? { images: [heroImage(state, 1200)] } : {}),
     },
   };
 }
@@ -207,8 +196,8 @@ export default async function StateHubPage({ params }) {
     url: hubUrl,
     containedInPlace: { '@type': 'Country', name: 'United States' },
   };
-  if (state.hero_image_url) {
-    destinationLd.image = state.hero_image_url;
+  if (hasHeroImage(state)) {
+    destinationLd.image = heroImage(state, 1600);
   }
 
   const breadcrumbLd = {
@@ -239,10 +228,10 @@ export default async function StateHubPage({ params }) {
       </nav>
 
       {/* Hero image */}
-      {state.hero_image_url && (
+      {hasHeroImage(state) && (
         <figure style={styles.heroFigure}>
           <img
-            src={heroSrc(state.hero_image_url)}
+            src={heroImage(state)}
             alt={state.hero_image_alt || name}
             style={styles.heroImage}
             loading="eager"
@@ -421,9 +410,9 @@ function StoryCard({ story }) {
     : null;
   return (
     <Link href={`/story/${story.slug}`} style={{ ...styles.card, borderTop: `4px solid ${COLORS.coral}`, padding: 0, overflow: 'hidden' }}>
-      {story.hero_image_url && (
+      {hasHeroImage(story) && (
         <div style={styles.storyImageWrap}>
-          <img src={heroSrc(story.hero_image_url, 600)} alt={story.hero_image_alt || story.title} loading="lazy" style={styles.storyImage} />
+          <img src={heroImage(story, 600)} alt={story.hero_image_alt || story.title} loading="lazy" style={styles.storyImage} />
         </div>
       )}
       <div style={styles.storyBody}>

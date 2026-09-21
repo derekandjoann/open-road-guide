@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import CategoryMap from '../../components/CategoryMap';
+import { heroImage, hasHeroImage } from '../../lib/images';
 
 // Open Road Guide brand palette
 const COLORS = {
@@ -73,7 +74,7 @@ export default function StoriesIndexPage({ initialStories = [], initialStateOpti
         slug: s.slug,
         title: s.title,
         type: s.story_type,
-        hero: s.hero_image_url,
+        hero: heroImage(s, 800),
         lng,
         lat,
       };
@@ -229,12 +230,12 @@ function StoryCard({ story, variant }) {
       href={`/story/${story.slug}`}
       style={isFeatured ? styles.cardFeatured : styles.card}
     >
-      {story.hero_image_url && (
+      {hasHeroImage(story) && (
         <div
           style={isFeatured ? styles.cardImageFeatured : styles.cardImage}
         >
           <img
-            src={story.hero_image_url}
+            src={heroImage(story, 800)}
             alt={story.hero_image_alt || story.title}
             style={styles.cardImageImg}
           />

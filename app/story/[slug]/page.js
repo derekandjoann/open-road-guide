@@ -2,6 +2,7 @@ import Link from 'next/link';
 import MileMarkersSignup from '../../../components/MileMarkersSignup';
 import { createClient } from '@supabase/supabase-js';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
+import { heroImage, hasHeroImage } from '../../../lib/images';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -48,7 +49,7 @@ export async function generateMetadata({ params }) {
 
   const { data: story } = await supabase
     .from('stories')
-    .select('title, seo_title, meta_description, excerpt, hero_image_url')
+    .select('title, seo_title, meta_description, excerpt, hero_image_url, hero_image_public_id')
     .eq('slug', slug)
     .eq('published', true)
     .maybeSingle();
@@ -73,7 +74,7 @@ export async function generateMetadata({ params }) {
       description,
       type: 'article',
       url,
-      ...(story.hero_image_url ? { images: [story.hero_image_url] } : {}),
+      ...(hasHeroImage(story) ? { images: [heroImage(story, 1200)] } : {}),
     },
   };
 }
@@ -159,7 +160,7 @@ export default async function StoryPage({ params }) {
     headline: story.title,
     description: ldDescription,
     inLanguage: 'en-US',
-    ...(story.hero_image_url ? { image: [story.hero_image_url] } : {}),
+    ...(hasHeroImage(story) ? { image: [heroImage(story, 1600)] } : {}),
     ...(story.published_at ? { datePublished: story.published_at } : {}),
     ...(story.updated_at || story.published_at
       ? { dateModified: story.updated_at || story.published_at }
@@ -230,11 +231,11 @@ export default async function StoryPage({ params }) {
         </nav>
 
         {/* Hero image (if set) */}
-        {story.hero_image_url && (
+        {hasHeroImage(story) && (
           <figure style={styles.heroFigure}>
             <div style={styles.heroImageWrap}>
               <img
-                src={story.hero_image_url}
+                src={heroImage(story, 1600)}
                 alt={story.hero_image_alt || story.title}
                 style={styles.heroImage}
               />

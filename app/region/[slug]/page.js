@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
 import { notFound } from 'next/navigation';
+import { heroImage, hasHeroImage, thumbImage, hasThumbImage } from '../../../lib/images';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -14,20 +15,6 @@ const toSlug = (s) =>
     .replace(/[^\w\s-]/g, '')
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-') || '';
-
-// Serve a right-sized, optimized hero from Supabase's image render endpoint
-// instead of the multi-megabyte original (e.g. a 14.7 MB JPEG comes down to
-// ~0.8 MB at width 1600). Falls back to the original URL untouched if it isn't
-// in the expected public-object form, so a non-Supabase URL still works.
-function heroSrc(url, width = 1600) {
-  if (!url) return '';
-  if (!url.includes('/storage/v1/object/public/')) return url;
-  const base = url.replace(
-    '/storage/v1/object/public/',
-    '/storage/v1/render/image/public/'
-  );
-  return `${base}${base.includes('?') ? '&' : '?'}width=${width}&resize=contain&quality=72`;
-}
 
 // Open Road Guide brand palette
 const COLORS = {
@@ -128,7 +115,7 @@ export async function generateMetadata({ params }) {
 
   const { data: region } = await supabase
     .from('regions')
-    .select('name, seo_title, meta_description, short_description, hero_image_url')
+    .select('name, seo_title, meta_description, short_description, hero_image_url, hero_image_public_id')
     .eq('slug', slug)
     .eq('published', true)
     .maybeSingle();
@@ -153,7 +140,7 @@ export async function generateMetadata({ params }) {
       description,
       type: 'article',
       url,
-      ...(region.hero_image_url ? { images: [heroSrc(region.hero_image_url, 1200)] } : {}),
+      ...(hasHeroImage(region) ? { images: [heroImage(region, 1200)] } : {}),
     },
   };
 }
@@ -179,7 +166,7 @@ export default async function RegionPage({ params }) {
   const { data: poiData } = await supabase
     .from('region_pois')
     .select(
-      'poi:pois(id, name, slug, tagline, nearest_city, nearest_highway, category, thumbnail_url, thumbnail_alt, published)'
+      'poi:pois(id, name, slug, tagline, nearest_city, nearest_highway, category, thumbnail_url, thumbnail_public_id, thumbnail_alt, published)'
     )
     .eq('region_id', region.id);
 
@@ -192,7 +179,7 @@ export default async function RegionPage({ params }) {
   const { data: storyData } = await supabase
     .from('story_regions')
     .select(
-      'story:stories(id, slug, title, subtitle, story_type, hero_image_url, hero_image_alt, reading_time_minutes, published, published_at, created_at)'
+      'story:stories(id, slug, title, subtitle, story_type, hero_image_url, hero_image_public_id, hero_image_alt, reading_time_minutes, published, published_at, created_at)'
     )
     .eq('region_id', region.id);
 
@@ -273,7 +260,7 @@ export default async function RegionPage({ params }) {
       name: 'Open Road Guide',
       url: 'https://openroadguide.com',
     },
-    ...(region.hero_image_url ? { image: [heroSrc(region.hero_image_url, 1200)] } : {}),
+    ...(hasHeroImage(region) ? { image: [heroImage(region, 1200)] } : {}),
     ...(places.length > 0
       ? {
           mainEntity: {
@@ -331,10 +318,10 @@ export default async function RegionPage({ params }) {
         </nav>
 
         {/* Hero image banner */}
-        {region.hero_image_url && (
+        {hasHeroImage(region) && (
           <figure style={styles.heroFigure}>
             <img
-              src={heroSrc(region.hero_image_url)}
+              src={heroImage(region)}
               alt={region.hero_image_alt || region.name}
               style={styles.heroImage}
               loading="eager"
@@ -392,9 +379,9 @@ export default async function RegionPage({ params }) {
                       href={`/poi/${place.slug || toSlug(place.name)}`}
                       style={styles.placeCard}
                     >
-                      {place.thumbnail_url && (
+                      {hasThumbImage(place) && (
                         <img
-                          src={heroSrc(place.thumbnail_url, 600)}
+                          src={thumbImage(place, 600)}
                           alt={place.thumbnail_alt || place.name}
                           loading="lazy"
                           style={styles.placeThumb}

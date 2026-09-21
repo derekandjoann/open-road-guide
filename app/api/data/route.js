@@ -40,7 +40,7 @@ export async function GET(request) {
   // ---------------------------------------------------------------- map
   if (kind === 'map') {
     const [poiR, routeR, regionR, regionPoiR, storyR, storyPoiR, markerR] = await Promise.all([
-      supabase.from('pois').select('id,slug,name,latitude,longitude,category,tagline,thumbnail_url').eq('published', true),
+      supabase.from('pois').select('id,slug,name,latitude,longitude,category,tagline,thumbnail_url,thumbnail_public_id').eq('published', true),
       supabase.from('routes').select('slug,name,total_miles,short_description,path_geojson').eq('published', true),
       supabase.from('regions').select('id,slug,name,short_description,bounds').eq('published', true),
       supabase.from('region_pois').select('region_id,poi_id'),
