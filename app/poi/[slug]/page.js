@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { notFound } from 'next/navigation';
 import { getCategoryColor, getCategoryEmoji } from '../../../lib/categoryColors';
 import { toSlug } from '../../../lib/slug';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
@@ -88,8 +89,10 @@ export async function generateMetadata({ params }) {
     'name, seo_title, tagline, meta_description, description'
   );
 
+  // Missing or unpublished slug: hand off to app/not-found.js, which sends a
+  // real 404 status (and noindex) instead of a "not found" page served as 200.
   if (!poi) {
-    return { title: { absolute: 'Place not found | Open Road Guide' } };
+    notFound();
   }
 
   const title = poi.seo_title || `${poi.name} | Open Road Guide`;
@@ -98,7 +101,7 @@ export async function generateMetadata({ params }) {
     poi.tagline ||
     (poi.description
       ? poi.description.slice(0, 155)
-      : `Visit ${poi.name} on your Utah road trip.`);
+      : `Visit ${poi.name} on a road trip through the American West.`);
   const url = `https://openroadguide.com/poi/${slug}`;
 
   return {
@@ -121,43 +124,10 @@ export default async function PoiDetailPage({ params }) {
   const poi = await fetchPoiBySlug(slug, '*');
 
   // ---------- Not found state ----------
+  // A real 404 via the site-wide app/not-found.js. The old inline "Place Not
+  // Found" screen rendered with HTTP 200, which search engines log as a soft 404.
   if (!poi) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontFamily: "'Outfit', sans-serif",
-        background: '#f8f7f4',
-        padding: '40px 20px',
-        textAlign: 'center',
-      }}>
-        <div style={{ fontSize: '48px', marginBottom: '16px' }}>🏜️</div>
-        <h1 style={{
-          fontFamily: "'Fraunces', serif",
-          fontSize: 'clamp(24px, 5vw, 28px)',
-          fontWeight: 800,
-          color: '#1a1a2e',
-          marginBottom: '8px',
-        }}>Place Not Found</h1>
-        <p style={{ color: '#888', fontSize: '16px', marginBottom: '24px' }}>
-          We couldn&apos;t find this stop on the map.
-        </p>
-        <a href="/explore" style={{
-          padding: '12px 28px',
-          background: '#ff6b5b',
-          color: '#fff',
-          borderRadius: '10px',
-          textDecoration: 'none',
-          fontWeight: 600,
-          fontSize: '15px',
-        }}>
-          Explore All Places →
-        </a>
-      </div>
-    );
+    notFound();
   }
 
   // 2. Fetch tags for this POI, joined with tag_categories so we can color them.
@@ -377,7 +347,7 @@ export default async function PoiDetailPage({ params }) {
     poi.meta_description ||
     poi.tagline ||
     toPlainText(poi.description || '').slice(0, 500) ||
-    `Visit ${poi.name} on your Utah road trip.`;
+    `Visit ${poi.name} on a road trip through the American West.`;
 
   const attractionLd = {
     '@context': 'https://schema.org',
