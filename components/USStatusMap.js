@@ -19,9 +19,23 @@ const COLORS = {
   warmGray: '#666',
 };
 
-// Live states cycle through the brand palette by sort_order, so each has its own hue
-// and the assignment stays stable as new states come online.
+// Live states take brand colours by sort_order, each taking the first colour that no
+// already-coloured live neighbour uses, so two bordering live states never share a hue.
+// Earlier states never change colour when a later one goes live.
 const LIVE_PALETTE = [COLORS.coral, COLORS.teal, COLORS.violet, COLORS.yellow];
+
+// Lower-48 borders by postal code. Four Corners point contacts count, since they touch
+// on the map. Alaska and Hawaii border no state.
+const BORDERS = {
+  AL: 'FL GA MS TN', AZ: 'CA CO NM NV UT', AR: 'LA MO MS OK TN TX', CA: 'AZ NV OR', CO: 'AZ KS NE NM OK UT WY', CT: 'MA NY RI',
+  DE: 'MD NJ PA', FL: 'AL GA', GA: 'AL FL NC SC TN', ID: 'MT NV OR UT WA WY', IL: 'IA IN KY MO WI', IN: 'IL KY MI OH',
+  IA: 'IL MN MO NE SD WI', KS: 'CO MO NE OK', KY: 'IL IN MO OH TN VA WV', LA: 'AR MS TX', ME: 'NH', MD: 'DE PA VA WV',
+  MA: 'CT NH NY RI VT', MI: 'IN OH WI', MN: 'IA ND SD WI', MS: 'AL AR LA TN', MO: 'AR IA IL KS KY NE OK TN', MT: 'ID ND SD WY',
+  NE: 'CO IA KS MO SD WY', NV: 'AZ CA ID OR UT', NH: 'MA ME VT', NJ: 'DE NY PA', NM: 'AZ CO OK TX UT', NY: 'CT MA NJ PA VT',
+  NC: 'GA SC TN VA', ND: 'MN MT SD', OH: 'IN KY MI PA WV', OK: 'AR CO KS MO NM TX', OR: 'CA ID NV WA', PA: 'DE MD NJ NY OH WV',
+  RI: 'CT MA', SC: 'GA NC', SD: 'IA MN MT ND NE WY', TN: 'AL AR GA KY MO MS NC VA', TX: 'AR LA NM OK', UT: 'AZ CO ID NM NV WY',
+  VT: 'MA NH NY', VA: 'KY MD NC TN WV', WA: 'ID OR', WV: 'KY MD OH PA VA', WI: 'IA IL MI MN', WY: 'CO ID MT NE SD UT',
+};
 
 const VIEWBOX = '0 0 975 610';
 
@@ -37,8 +51,17 @@ export default function USStatusMap({ states = [] }) {
   const liveSorted = states
     .filter((s) => s.status === 'live')
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const codeFor = {};
+  US_STATES.forEach((s) => { codeFor[s.name] = s.code; });
   const colorFor = {};
-  liveSorted.forEach((s, i) => { colorFor[s.name] = LIVE_PALETTE[i % LIVE_PALETTE.length]; });
+  const colorByCode = {};
+  liveSorted.forEach((s, i) => {
+    const code = codeFor[s.name];
+    const taken = new Set(((code && BORDERS[code]) || '').split(' ').map((c) => colorByCode[c]).filter(Boolean));
+    const pick = LIVE_PALETTE.find((c) => !taken.has(c)) || LIVE_PALETTE[i % LIVE_PALETTE.length];
+    colorFor[s.name] = pick;
+    if (code) colorByCode[code] = pick;
+  });
 
   function styleFor(name) {
     const row = byName[name];
