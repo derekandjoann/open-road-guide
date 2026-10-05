@@ -54,6 +54,13 @@ export default async function HomePage() {
   );
   const categories = [...new Set(pois.map((p) => p.category).filter(Boolean))].sort();
 
+  // Spelled-out count for the status-map sentence, so the copy follows the
+  // live states in the database instead of going stale at each state flip.
+  const COUNT_WORDS = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
+  const n = liveStates.length;
+  const countWord = COUNT_WORDS[n] || String(n);
+  const liveSentence = `${countWord} ${n === 1 ? 'state is' : 'states are'} mapped end to end so far, with more filling in as we drive them.`;
+
   const statBits = [
     liveStates.length > 0 && `${liveStates.length} ${liveStates.length === 1 ? 'state' : 'states'}`,
     pois.length > 0 && `${pois.length} places`,
@@ -115,8 +122,7 @@ export default async function HomePage() {
         <div style={statusBlock.head}>
           <h2 style={statusBlock.heading}>The West, state by state</h2>
           <p style={statusBlock.sub}>
-            Three states are mapped end to end so far, with more filling in as we
-            drive them. Tap a lit-up state to head there.
+            {liveSentence} Tap a lit-up state to head there.
           </p>
         </div>
         <USStatusMap states={states} />
