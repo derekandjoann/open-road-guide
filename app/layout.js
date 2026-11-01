@@ -51,7 +51,7 @@ export default function RootLayout({ children }) {
             AdSense's verification crawler looks for it. */}
         <script
           async
-          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5023148688911509"
+          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5630628197846834"
           crossOrigin="anonymous"
         />
         {/* Structured data for search engines (read from the server-rendered HTML) */}
