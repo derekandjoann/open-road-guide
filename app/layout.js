@@ -46,6 +46,14 @@ export default function RootLayout({ children }) {
           href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
           rel="stylesheet"
         />
+        {/* Google AdSense (site verification + ads). A plain script tag, not
+            next/script, so it ships in the server-rendered <head> where
+            AdSense's verification crawler looks for it. */}
+        <script
+          async
+          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5023148688911509"
+          crossOrigin="anonymous"
+        />
         {/* Structured data for search engines (read from the server-rendered HTML) */}
         <script
           type="application/ld+json"
