@@ -91,6 +91,29 @@ function formatErected(erectedBy, yearErected) {
   return alreadyStated ? `Erected by ${by}` : `Erected by ${by}, ${yr}`;
 }
 
+// Build the search-result snippet from the editorial description without
+// cutting a sentence in half. Google shows roughly 155-160 characters, so
+// whole sentences are kept while they fit in 160 and fill at least 100;
+// otherwise the text is cut at the last word break and closed with "...".
+// (Previously a flat slice(0, 155), which ended snippets mid-word.)
+function metaDescription(text, max = 160) {
+  const clean = (text || '').replace(/\s+/g, ' ').trim();
+  if (clean.length <= max) return clean;
+  const sentences = clean.split(/(?<=[.!?])\s+/);
+  let out = '';
+  for (const s of sentences) {
+    const next = out ? `${out} ${s}` : s;
+    if (next.length > max) break;
+    out = next;
+  }
+  // Keep the whole-sentence version only if it fills most of the space;
+  // a short opener ("That bank is gone.") alone makes a thin snippet.
+  if (out.length >= 100) return out;
+  const cut = clean.slice(0, max - 3);
+  const lastSpace = cut.lastIndexOf(' ');
+  return `${(lastSpace > 0 ? cut.slice(0, lastSpace) : cut).replace(/[,;:—-]+$/, '')}...`;
+}
+
 // Server-rendered metadata: real per-marker <title>/<meta>/Open Graph tags
 // and canonical, shipped in the initial HTML for crawlers.
 export async function generateMetadata({ params }) {
@@ -103,7 +126,7 @@ export async function generateMetadata({ params }) {
   }
 
   const title = `${marker.name} — ${marker.state} Historical Marker | Open Road Guide`;
-  const description = (marker.description || '').slice(0, 155);
+  const description = metaDescription(marker.description);
   const url = `${BASE}/marker/${slug}`;
 
   return {
