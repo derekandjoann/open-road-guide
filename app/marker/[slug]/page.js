@@ -99,7 +99,16 @@ function formatErected(erectedBy, yearErected) {
 function metaDescription(text, max = 160) {
   const clean = (text || '').replace(/\s+/g, ' ').trim();
   if (clean.length <= max) return clean;
-  const sentences = clean.split(/(?<=[.!?])\s+/);
+  // Split into sentences, then re-join any break that follows a title or an
+  // initial ("Dr. W. Smith", "Ft. Worth", "U.S. Army"), which are not
+  // sentence ends.
+  const ABBREV = /(?:\b(?:Dr|Mr|Mrs|Ms|St|Ste|Ft|Mt|Capt|Gen|Col|Lt|Sgt|Maj|Rev|Gov|Sen|Rep|Jr|Sr|No|Co|Bros|Inc|vs)|\b[A-Z]|\b(?:[A-Z]\.)+[A-Z])\.$/;
+  const sentences = [];
+  for (const piece of clean.split(/(?<=[.!?])\s+/)) {
+    const prev = sentences[sentences.length - 1];
+    if (prev && ABBREV.test(prev)) sentences[sentences.length - 1] = `${prev} ${piece}`;
+    else sentences.push(piece);
+  }
   let out = '';
   for (const s of sentences) {
     const next = out ? `${out} ${s}` : s;
