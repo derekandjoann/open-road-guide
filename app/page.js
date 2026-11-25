@@ -4,6 +4,11 @@ import MapView from '../components/MapView';
 import MapLegend from '../components/MapLegend';
 import USStatusMap from '../components/USStatusMap';
 import { heroImage, hasHeroImage } from '../lib/images';
+import { fetchAll } from '../lib/fetchAll';
+
+// Rebuilt in the background at most once an hour, so new content appears
+// here without a manual deploy.
+export const revalidate = 3600;
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -21,12 +26,12 @@ const COLORS = {
 };
 
 export const metadata = {
-  title: { absolute: 'Open Road Guide — Road Trip Guides to the American West' },
+  title: { absolute: 'Open Road Guide — Road Trip Guides, State by State' },
   description:
-    'Field-tested road trip guides to the American West — the parks, ghost towns, scenic drives, and roadside stories most maps leave out. Pick a state and start exploring.',
+    'Field-tested road trip guides, state by state: the parks, ghost towns, scenic drives, historical markers and roadside stories most maps leave out.',
   alternates: { canonical: 'https://openroadguide.com' },
   openGraph: {
-    title: 'Open Road Guide — Road Trip Guides to the American West',
+    title: 'Open Road Guide — Road Trip Guides, State by State',
     description:
       'Pick a state and start exploring — the parks, ghost towns, scenic drives, and roadside stories most maps leave out.',
     type: 'website',
@@ -35,17 +40,33 @@ export const metadata = {
 };
 
 export default async function HomePage() {
-  const [stateRes, poiRes] = await Promise.all([
+  // Places are read in pages (the database returns at most 1,000 rows per
+  // request), and the other totals are counted in the database.
+  const head = (table, live) => {
+    let q = supabase.from(table).select('id', { count: 'exact', head: true });
+    if (live === 'published') q = q.eq('published', true);
+    if (live === 'unparked') q = q.or('parked.is.null,parked.eq.false');
+    return q;
+  };
+  const [stateRes, poiRows, markerCount, storyCount, routeCount] = await Promise.all([
     supabase
       .from('states')
       .select('*')
       .eq('published', true)
       .order('sort_order', { ascending: true }),
-    supabase
-      .from('pois')
-      .select('id, name, slug, tagline, category, longitude, latitude')
-      .eq('published', true),
+    fetchAll((from, to) =>
+      supabase
+        .from('pois')
+        .select('id, name, slug, tagline, category, longitude, latitude')
+        .eq('published', true)
+        .order('id')
+        .range(from, to)
+    ).catch(() => []),
+    head('markers', 'unparked'),
+    head('stories', 'published'),
+    head('routes', 'published'),
   ]);
+  const poiRes = { data: poiRows };
 
   const states = stateRes.data || [];
   const liveStates = states.filter((s) => s.status === 'live');
@@ -61,10 +82,13 @@ export default async function HomePage() {
   const countWord = COUNT_WORDS[n] || String(n);
   const liveSentence = `${countWord} ${n === 1 ? 'state is' : 'states are'} mapped end to end so far, with more filling in as we drive them.`;
 
+  const fmt = (x) => Number(x).toLocaleString('en-US');
   const statBits = [
-    liveStates.length > 0 && `${liveStates.length} ${liveStates.length === 1 ? 'state' : 'states'}`,
-    pois.length > 0 && `${pois.length} places`,
-    categories.length > 0 && `${categories.length} categories`,
+    states.length > 0 && `${states.length} ${states.length === 1 ? 'state' : 'states'}`,
+    pois.length > 0 && `${fmt(pois.length)} places`,
+    markerCount.count > 0 && `${fmt(markerCount.count)} historical markers`,
+    routeCount.count > 0 && `${fmt(routeCount.count)} drives`,
+    storyCount.count > 0 && `${fmt(storyCount.count)} stories`,
   ].filter(Boolean);
 
   return (
@@ -76,7 +100,7 @@ export default async function HomePage() {
         <div style={hero.inner}>
           <div style={hero.badge}>
             <span style={{ fontSize: '14px' }}>🛣️</span>
-            <span style={hero.badgeText}>Guides to the American West</span>
+            <span style={hero.badgeText}>Road trip guides, state by state</span>
           </div>
 
           <h1 style={hero.title}>
@@ -85,9 +109,9 @@ export default async function HomePage() {
           </h1>
 
           <p style={hero.sub}>
-            Field-tested guides to the American West — the parks, the ghost towns, the
-            scenic drives, and the roadside stories most maps leave out. Pick a state
-            below and start exploring.
+            Field-tested guides to the parks, the ghost towns, the scenic drives, the
+            historical markers and the roadside stories most maps leave out. Pick a
+            state below and start exploring.
           </p>
 
           <div style={hero.ctaRow}>
@@ -120,7 +144,7 @@ export default async function HomePage() {
       {/* ===== NATIONAL STATUS MAP ===== */}
       <section style={statusBlock.section}>
         <div style={statusBlock.head}>
-          <h2 style={statusBlock.heading}>The West, state by state</h2>
+          <h2 style={statusBlock.heading}>The map, state by state</h2>
           <p style={statusBlock.sub}>
             {liveSentence} Tap a lit-up state to head there.
           </p>

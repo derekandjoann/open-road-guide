@@ -5,6 +5,10 @@ import MapLegend from '../../components/MapLegend';
 import { notFound } from 'next/navigation';
 import { heroImage, hasHeroImage } from '../../lib/images';
 
+// Rebuilt in the background at most once an hour, so new content appears
+// here without a manual deploy.
+export const revalidate = 3600;
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -222,7 +226,7 @@ export default async function StateHubPage({ params }) {
 
       {/* Breadcrumb */}
       <nav style={styles.breadcrumb}>
-        <Link href="/" style={styles.crumbLink}>Home</Link>
+        <Link href="/" prefetch={false} style={styles.crumbLink}>Home</Link>
         <span style={styles.crumbSep}>›</span>
         <span style={styles.crumbCurrent}>{name}</span>
       </nav>
@@ -376,7 +380,7 @@ export default async function StateHubPage({ params }) {
 
       {/* Back to chooser */}
       <div style={styles.backWrap}>
-        <Link href="/" style={styles.backLink}>← Explore another state</Link>
+        <Link href="/" prefetch={false} style={styles.backLink}>← Explore another state</Link>
       </div>
     </main>
   );

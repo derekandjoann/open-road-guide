@@ -139,6 +139,7 @@ function StateSwitcher({ states, currentSlug, theme }) {
             <li key={st.slug}>
               <Link
                 href={`/${st.slug}`}
+                prefetch={false}
                 style={st.slug === currentSlug ? menuItemActive : menuItem}
                 onClick={() => setOpen(false)}
               >
@@ -196,7 +197,7 @@ export default function Nav() {
 
   return (
     <nav style={s.nav}>
-      <Link href="/" style={s.logo}>
+      <Link href="/" prefetch={false} style={s.logo}>
         Open Road Guide
       </Link>
       <ul style={s.links}>
@@ -205,7 +206,7 @@ export default function Nav() {
           const isActive = isNavLinkActive(pathname, link.href);
           return (
             <li key={link.href}>
-              <Link href={link.href} style={isActive ? s.linkActive : s.link}>
+              <Link href={link.href} prefetch={false} style={isActive ? s.linkActive : s.link}>
                 {link.label}
               </Link>
             </li>

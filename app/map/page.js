@@ -65,6 +65,7 @@ export default function MapPage() {
   const addedRef = useRef(false);
   const userMarkerRef = useRef(null);
   const autoNearRef = useRef(false);
+  const markersLoadedRef = useRef(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
@@ -127,7 +128,6 @@ export default function MapPage() {
         const regionPoiR = { data: payload.regionPois || [] };
         const storyR = { data: payload.stories || [] };
         const storyPoiR = { data: payload.storyPois || [] };
-        const markerR = { data: payload.markers || null };
 
         const pois = poiR.data || [];
         const poiById = new Map(pois.map((p) => [p.id, p]));
@@ -213,14 +213,12 @@ export default function MapPage() {
           }));
         });
 
-        // Historical markers come back as a ready FeatureCollection from the RPC.
-        // Defensive: a marker failure must never blank the other overlays.
-        const markerFC = (markerR && !markerR.error && markerR.data && Array.isArray(markerR.data.features))
-          ? markerR.data
-          : fc([]);
+        // Historical marker dots (23,000+) load only when the Markers layer is
+        // switched on, from their own CDN-cached file (see toggle below).
+        const markerFC = fc([]);
 
         setData({
-          counts: { pois: poiFeatures.length, routes: routeFeatures.length, regions: regionFeatures.length, stories: (storyR.data || []).length, markers: markerFC.features.length },
+          counts: { pois: poiFeatures.length, routes: routeFeatures.length, regions: regionFeatures.length, stories: (storyR.data || []).length, markers: null },
           poiFC: fc(poiFeatures),
           routeFC: fc(routeFeatures),
           regionFC: fc(regionFeatures),
@@ -310,7 +308,7 @@ export default function MapPage() {
       map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
     });
 
-    // Frame Utah from the POIs.
+    // Frame the map on every place.
     try {
       const b = new maplibregl.LngLatBounds();
       data.poiFC.features.forEach((f) => b.extend(f.geometry.coordinates));
@@ -417,6 +415,29 @@ export default function MapPage() {
     const groups = { pois: ['pois-layer'], routes: ['routes-casing', 'routes-line'], regions: ['regions-fill', 'regions-outline'], stories: ['story-arcs', 'story-rings'], markers: ['markers-layer'] };
     const map = mapRef.current;
     if (map) groups[layer].forEach((id) => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis(next[layer])); });
+    if (layer === 'markers' && next.markers && !markersLoadedRef.current) loadMarkerDots();
+  }
+
+  // First time the Markers layer is switched on, fetch every marker as a
+  // light dot ([lng, lat, slug, name]) and hand it to the map.
+  async function loadMarkerDots() {
+    markersLoadedRef.current = true;
+    try {
+      const res = await fetch('/api/marker-points');
+      if (!res.ok) throw new Error('marker-points ' + res.status);
+      const rows = await res.json();
+      const feats = (Array.isArray(rows) ? rows : []).map(([lng, lat, slug, name]) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [lng, lat] },
+        properties: { kind: 'marker', slug: slug || '', name, told: !!slug },
+      }));
+      const src = mapRef.current && mapRef.current.getSource('markers');
+      if (src) src.setData(fc(feats));
+      setData((d) => (d ? { ...d, counts: { ...d.counts, markers: feats.length } } : d));
+    } catch (e) {
+      console.error('marker dots failed', e);
+      markersLoadedRef.current = false;
+    }
   }
 
   const c = data ? data.counts : null;
@@ -542,12 +563,6 @@ function doorwaySheet(close, color, typeLabel, name, meta, body, connects, doorL
 }
 
 function markerSheet(close, m) {
-  const told = m.told === true || m.told === 'true';
-  const place = [m.city, m.county ? `${m.county} County` : null].filter(Boolean).join(', ');
-  const meta = [m.year ? `Erected ${m.year}` : null, m.erected_by, place].filter(Boolean).join(' · ');
-  const body = told && m.note
-    ? m.note
-    : (m.commemorates ? `Commemorates ${m.commemorates}.` : null);
   const color = '#a9763e';
   return (
     <div className="nm-sheet">
@@ -557,16 +572,9 @@ function markerSheet(close, m) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color }}>
           <span style={{ width: 9, height: 9, borderRadius: '50%', background: color, display: 'inline-block' }} />Historical Marker
         </div>
-        <h2 style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 21, margin: '6px 0 3px', lineHeight: 1.12, paddingRight: 30 }}>{m.name}</h2>
-        {meta ? <div style={{ fontSize: 12.5, color: '#6b7280', marginBottom: 9 }}>{meta}</div> : null}
-        {body ? <p style={{ fontSize: 14, lineHeight: 1.5, color: '#3c4256', margin: '0 0 12px' }}>{body}</p> : <div style={{ height: 4 }} />}
-        {m.hmdb_url ? (
-          <a href={m.hmdb_url} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: '#1a1a2e', textDecoration: 'none', borderBottom: '1px solid #d8d2c4', paddingBottom: 1 }}>Full inscription &amp; photos →</a>
-        ) : m.url ? (
-          <a href={m.url} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: '#1a1a2e', textDecoration: 'none', borderBottom: '1px solid #d8d2c4', paddingBottom: 1 }}>State record →</a>
-        ) : null}
-        {!told ? (
-          <div style={{ fontSize: 11, color: '#9aa0a8', marginTop: 12, lineHeight: 1.4 }}>From the Utah Division of State History monuments &amp; markers survey.</div>
+        <h2 style={{ fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 21, margin: '6px 0 12px', lineHeight: 1.12, paddingRight: 30 }}>{m.name}</h2>
+        {m.slug ? (
+          <a href={`/marker/${m.slug}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: 600, color: '#1a1a2e', textDecoration: 'none', borderBottom: '1px solid #d8d2c4', paddingBottom: 1 }}>Read the marker&rsquo;s story →</a>
         ) : null}
       </div>
     </div>

@@ -8,7 +8,14 @@ import { heroImage, hasHeroImage } from '../../../lib/images';
 // build time — same rationale as the POI and marker pages: the prose lives in
 // Supabase and edits go live instantly with no deploy, while crawlers still
 // get fully server-rendered HTML plus real per-page <title>/<meta>/OG tags.
-export const dynamic = 'force-dynamic';
+// Pages are built on a visitor's first request, then served from the cache
+// and rebuilt in the background at most once an hour, so a database edit
+// shows up within the hour with no deploy, and the database isn't asked
+// again on every view.
+export const revalidate = 3600;
+export async function generateStaticParams() {
+  return [];
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -283,7 +290,7 @@ export default async function ItineraryPage({ params }) {
 
       {/* Breadcrumb */}
       <nav style={styles.breadcrumb}>
-        <Link href="/" style={styles.crumbLink}>Home</Link>
+        <Link href="/" prefetch={false} style={styles.crumbLink}>Home</Link>
         {stateSlug && (
           <>
             <span style={styles.crumbSep}>›</span>
@@ -420,7 +427,7 @@ export default async function ItineraryPage({ params }) {
             ← More of {itin.state}
           </Link>
         ) : (
-          <Link href="/" style={styles.backLink}>← Explore Open Road Guide</Link>
+          <Link href="/" prefetch={false} style={styles.backLink}>← Explore Open Road Guide</Link>
         )}
       </div>
     </main>

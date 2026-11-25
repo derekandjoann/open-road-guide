@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import ShowMore from '../../components/ShowMore';
 import Link from 'next/link';
 import CategoryMap from '../../components/CategoryMap';
 
@@ -46,6 +47,7 @@ export default function RoutesIndexPage({ initialRoutes = [], initialStateOption
   const [stateOptions, setStateOptions] = useState(initialStateOptions);
   // null = "All". Otherwise the canonical state name (e.g. "Nevada").
   const [activeState, setActiveState] = useState(null);
+  const [shownCount, setShownCount] = useState(24);
   const [loading, setLoading] = useState(false);
 
   // Data is seeded from the server render (see page.js); only the ?state=
@@ -63,6 +65,7 @@ export default function RoutesIndexPage({ initialRoutes = [], initialStateOption
   function applyState(option) {
     const name = option ? option.name : null;
     setActiveState(name);
+    setShownCount(24);
 
     const url = new URL(window.location.href);
     if (option) url.searchParams.set('state', option.slug);
@@ -84,7 +87,7 @@ export default function RoutesIndexPage({ initialRoutes = [], initialStateOption
     <main style={styles.main}>
       {/* Breadcrumb */}
       <nav style={styles.breadcrumb}>
-        <Link href="/" style={styles.crumbLink}>
+        <Link href="/" prefetch={false} style={styles.crumbLink}>
           Home
         </Link>
         <span style={styles.crumbSep}>›</span>
@@ -96,7 +99,7 @@ export default function RoutesIndexPage({ initialRoutes = [], initialStateOption
         <div style={styles.eyebrow}>Open Road Guide</div>
         <h1 style={styles.title}>Routes</h1>
         <p style={styles.tagline}>
-          Long-form road trip guides through the American West — every stop,
+          Long-form road trip guides across the country — every stop,
           every story, every mile that makes the drive worth taking.
         </p>
       </header>
@@ -138,17 +141,18 @@ export default function RoutesIndexPage({ initialRoutes = [], initialStateOption
       ) : (
         <section style={styles.cardsGrid}>
           {/* Real routes from Supabase */}
-          {visibleRoutes.map((route) => (
+          {visibleRoutes.slice(0, shownCount).map((route) => (
             <RouteCard key={route.id} route={route} color={route._color} />
           ))}
 
           {/* Coming soon placeholders — only in the All view (they carry no state) */}
-          {activeState === null &&
+          {activeState === null && shownCount >= visibleRoutes.length &&
             COMING_SOON.map((r, i) => (
               <ComingSoonCard key={`cs-${i}`} route={r} />
             ))}
         </section>
       )}
+      <ShowMore shown={shownCount} total={visibleRoutes.length} onMore={() => setShownCount((n) => n + 24)} label="More routes" />
     </main>
   );
 }

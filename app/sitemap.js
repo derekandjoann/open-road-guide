@@ -8,7 +8,7 @@ const BASE = 'https://openroadguide.com';
 // newly described markers and new POIs/stories stay out of the sitemap until the
 // next manual deploy. A daily rebuild keeps discovery current on its own — the
 // pages themselves already resolve the moment their prose exists.
-export const revalidate = 86400;
+export const revalidate = 3600;
 
 // PostgREST returns at most 1000 rows per request. Content tables are
 // already past that in aggregate (described markers alone will be), so every
@@ -25,6 +25,8 @@ async function fetchAll(table, columns, applyFilters) {
       let query = supabase
         .from(table)
         .select(columns)
+        // A fixed order keeps pages from overlapping or skipping rows.
+        .order('slug', { ascending: true })
         .range(from, from + PAGE - 1);
       if (applyFilters) query = applyFilters(query);
       const { data, error } = await query;
@@ -46,7 +48,9 @@ const describedMarkers = (q) =>
   q
     .not('slug', 'is', null)
     .not('description', 'is', null)
-    .neq('description', '');
+    .neq('description', '')
+    // Parked markers were taken off the site; keep them out of the sitemap.
+    .or('parked.is.null,parked.eq.false');
 
 // Only tags with editorial prose get sitemap entries — that's the ≥5-item set
 // we've written; blank tags stay out until they earn a description.

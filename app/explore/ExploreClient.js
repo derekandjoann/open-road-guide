@@ -45,6 +45,9 @@ export default function ExplorePage({ initialPois = [], initialStateOptions = []
   // legacy substring filter below applies, so search never breaks.
   const [searchResults, setSearchResults] = useState(null);
   const [selectedPoi, setSelectedPoi] = useState(null);
+  // The list renders in pages of 60 so a phone isn't asked to draw thousands
+  // of cards at once; the map still shows every match.
+  const [visibleCount, setVisibleCount] = useState(60);
   const [loading, setLoading] = useState(false);
   // Mobile layout switch: stack map over list below 768px. matchMedia with a
   // change listener keeps it correct through rotation; initial false avoids
@@ -158,6 +161,7 @@ export default function ExplorePage({ initialPois = [], initialStateOptions = []
       result = result.filter(p => p.category === activeCategory);
     }
     setFilteredPois(result);
+    setVisibleCount(60);
   }, [activeCategory, activeState, searchQuery, searchResults, pois]);
 
   // Scroll to selected POI. On mobile the map is a sticky pane pinned to the
@@ -408,7 +412,7 @@ export default function ExplorePage({ initialPois = [], initialStateOptions = []
         ) : (
           <>
             {/* Wordmark — links home, like the old nav. */}
-            <Link href="/" style={{
+            <Link href="/" prefetch={false} style={{
               fontFamily: "'Fraunces', serif",
               fontSize: '21px',
               fontWeight: 800,
@@ -425,6 +429,7 @@ export default function ExplorePage({ initialPois = [], initialStateOptions = []
                 <Link
                   key={link.href}
                   href={link.href}
+                  prefetch={false}
                   style={isNavLinkActive(pathname, link.href) ? navTabActive : navTabInactive}
                 >
                   {link.label}
@@ -621,16 +626,40 @@ export default function ExplorePage({ initialPois = [], initialStateOptions = []
               No places match your filters.
             </div>
           ) : (
-            filteredPois.map((poi) => (
-              <PoiCard
-                key={poi.id}
-                poi={poi}
-                isSelected={selectedPoi?.id === poi.id}
-                isMobile={isMobile}
-                controlsH={controlsH}
-                onClick={() => setSelectedPoi(poi)}
-              />
-            ))
+            <>
+              {(() => {
+                const shown = filteredPois.slice(0, visibleCount);
+                // A place tapped on the map may sit past the shown page; put it on top.
+                if (selectedPoi && !shown.some((p) => p.id === selectedPoi.id) && filteredPois.some((p) => p.id === selectedPoi.id)) {
+                  shown.unshift(selectedPoi);
+                }
+                return shown.map((poi) => (
+                  <PoiCard
+                    key={poi.id}
+                    poi={poi}
+                    isSelected={selectedPoi?.id === poi.id}
+                    isMobile={isMobile}
+                    controlsH={controlsH}
+                    onClick={() => setSelectedPoi(poi)}
+                  />
+                ));
+              })()}
+              {filteredPois.length > visibleCount && (
+                <div style={{ padding: '16px 20px 24px', textAlign: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCount((n) => n + 60)}
+                    style={{
+                      background: '#1a1a2e', color: '#fff', border: 'none', borderRadius: '999px',
+                      padding: '10px 22px', fontSize: '14px', fontWeight: 600, cursor: 'pointer',
+                      fontFamily: "'Outfit', sans-serif",
+                    }}
+                  >
+                    Show more ({(filteredPois.length - visibleCount).toLocaleString()} left)
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

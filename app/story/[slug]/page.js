@@ -4,6 +4,10 @@ import { createClient } from '@supabase/supabase-js';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
 import { heroImage, hasHeroImage } from '../../../lib/images';
 
+// Rebuilt in the background at most once an hour, so new content appears
+// here without a manual deploy.
+export const revalidate = 3600;
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -219,7 +223,7 @@ export default async function StoryPage({ params }) {
       <main style={styles.main}>
         {/* Breadcrumb */}
         <nav style={styles.breadcrumb}>
-          <Link href="/" style={styles.crumbLink}>
+          <Link href="/" prefetch={false} style={styles.crumbLink}>
             Home
           </Link>
           <span style={styles.crumbSep}>›</span>

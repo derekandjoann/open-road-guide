@@ -1,6 +1,10 @@
-// Server component: run the markers_overlay RPC + states up front and map the
-// GeoJSON features into the light row shape the client expects, so the county
-// index and state lens arrive as real HTML. Metadata lives here now too.
+// Server component for /markers.
+//
+// It used to ask the database for every marker at once (23,000+ rows built
+// into one blob). That query ran past the database's 3-second limit, came
+// back empty, and the page said "No markers here yet." Now the server sends
+// only the county index (one row per county, with counts); a county's
+// markers and search results load on demand through /api/data.
 import { createClient } from '@supabase/supabase-js';
 import MarkersClient from './MarkersClient';
 
@@ -9,9 +13,12 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
+// Rebuilt at most once an hour, so new markers show up without a deploy.
+export const revalidate = 3600;
+
 const TITLE = 'Historical Markers | Open Road Guide';
 const DESC =
-  'Every roadside historical marker across the American West, browsable by state and county — the plaques and monuments where the region remembers itself.';
+  'Roadside historical markers state by state and county by county, each with its story, its location and the stops nearby.';
 const URL = 'https://openroadguide.com/markers';
 
 export const metadata = {
@@ -22,39 +29,20 @@ export const metadata = {
 };
 
 export default async function MarkersPage() {
-  const [overlayRes, stateRes] = await Promise.all([
-    supabase.rpc('markers_overlay'),
+  const [countRes, stateRes] = await Promise.all([
+    // One bundled value, so the API's 1,000-row cap can't cut the list short.
+    supabase.rpc('markers_county_index'),
     supabase.from('states').select('slug, name').eq('published', true).order('sort_order', { ascending: true }),
   ]);
 
-  // Same feature -> light-row mapping the client used to do in its useEffect.
-  const features = overlayRes?.data?.features || [];
-  const rows = features.map((f) => {
-    const [lng, lat] = f.geometry?.coordinates || [];
-    const p = f.properties || {};
-    return {
-      id: p.id,
-      name: p.name,
-      slug: p.slug,
-      longitude: lng,
-      latitude: lat,
-      state: p.state,
-      county: p.county || 'Unknown',
-      city: p.city,
-      theme: p.theme,
-      commemorates: p.commemorates,
-      marker_type: p.marker_type,
-      year: p.year,
-      erected_by: p.erected_by,
-      note: p.note,
-      hmdb_url: p.hmdb_url,
-      has_description: !!p.has_description,
-      has_inscription: !!p.has_inscription,
-    };
-  });
+  const counties = (Array.isArray(countRes.data) ? countRes.data : []).map(([state, county, count]) => ({
+    state,
+    county,
+    count: Number(count) || 0,
+  }));
 
-  const present = new Set(rows.map((m) => m.state).filter(Boolean));
+  const present = new Set(counties.map((c) => c.state).filter(Boolean));
   const options = (stateRes.data || []).filter((s) => present.has(s.name));
 
-  return <MarkersClient initialMarkers={rows} initialStateOptions={options} />;
+  return <MarkersClient initialCounties={counties} initialStateOptions={options} />;
 }

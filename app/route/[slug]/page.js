@@ -9,7 +9,14 @@ import { heroImage, hasHeroImage } from '../../../lib/images';
 // such edits go live instantly with no deploy. Dynamic rendering preserves that
 // while still shipping fully server-rendered HTML and real per-route
 // <title>/<meta>/Open Graph tags (via generateMetadata) for crawlers.
-export const dynamic = 'force-dynamic';
+// Pages are built on a visitor's first request, then served from the cache
+// and rebuilt in the background at most once an hour, so a database edit
+// shows up within the hour with no deploy, and the database isn't asked
+// again on every view.
+export const revalidate = 3600;
+export async function generateStaticParams() {
+  return [];
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -185,7 +192,7 @@ export default async function RoutePage({ params }) {
         <div style={styles.notFound}>
           <h1 style={styles.notFoundTitle}>Route not found</h1>
           <p>We couldn&apos;t find a route called &ldquo;{slug}&rdquo;.</p>
-          <Link href="/" style={styles.link}>
+          <Link href="/" prefetch={false} style={styles.link}>
             ← Back to Open Road Guide
           </Link>
         </div>
@@ -342,7 +349,7 @@ export default async function RoutePage({ params }) {
       />
 
       <nav style={styles.breadcrumb}>
-        <Link href="/" style={styles.crumbLink}>
+        <Link href="/" prefetch={false} style={styles.crumbLink}>
           Home
         </Link>
         <span style={styles.crumbSep}>›</span>
@@ -606,7 +613,7 @@ export default async function RoutePage({ params }) {
           That&apos;s the drive. Take your time, pull over often, and let{' '}
           {route.name} do what it does best.
         </p>
-        <Link href="/" style={styles.closingLink}>
+        <Link href="/" prefetch={false} style={styles.closingLink}>
           ← Explore more of Open Road Guide
         </Link>
       </section>

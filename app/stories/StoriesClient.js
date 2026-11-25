@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import ShowMore from '../../components/ShowMore';
 import Link from 'next/link';
 import CategoryMap from '../../components/CategoryMap';
 import { heroImage, hasHeroImage } from '../../lib/images';
@@ -23,6 +24,7 @@ export default function StoriesIndexPage({ initialStories = [], initialStateOpti
   const [stateOptions, setStateOptions] = useState(initialStateOptions);
   // null = "All". Otherwise the canonical state name (e.g. "Nevada").
   const [activeState, setActiveState] = useState(null);
+  const [shownCount, setShownCount] = useState(24);
   const [loading, setLoading] = useState(false);
 
   // Data is seeded from the server render (see page.js); only the ?state=
@@ -40,6 +42,7 @@ export default function StoriesIndexPage({ initialStories = [], initialStateOpti
   function applyState(option) {
     const name = option ? option.name : null;
     setActiveState(name);
+    setShownCount(24);
 
     const url = new URL(window.location.href);
     if (option) url.searchParams.set('state', option.slug);
@@ -85,7 +88,7 @@ export default function StoriesIndexPage({ initialStories = [], initialStateOpti
     <main style={styles.main}>
       {/* Breadcrumb */}
       <nav style={styles.breadcrumb}>
-        <Link href="/" style={styles.crumbLink}>
+        <Link href="/" prefetch={false} style={styles.crumbLink}>
           Home
         </Link>
         <span style={styles.crumbSep}>›</span>
@@ -98,7 +101,7 @@ export default function StoriesIndexPage({ initialStories = [], initialStateOpti
         <h1 style={styles.title}>Stories</h1>
         <p style={styles.tagline}>
           Long-reads about the places, people, and history that make the
-          American West worth driving across.
+          roads worth driving.
         </p>
       </header>
 
@@ -157,10 +160,11 @@ export default function StoriesIndexPage({ initialStories = [], initialStateOpti
                 <h2 style={styles.sectionHeading}>More Stories</h2>
               )}
               <div style={styles.regularGrid}>
-                {regular.map((story) => (
+                {regular.slice(0, shownCount).map((story) => (
                   <StoryCard key={story.id} story={story} variant="regular" />
                 ))}
               </div>
+              <ShowMore shown={shownCount} total={regular.length} onMore={() => setShownCount((n) => n + 24)} label="More stories" />
             </section>
           )}
         </>
@@ -237,6 +241,8 @@ function StoryCard({ story, variant }) {
           <img
             src={heroImage(story, 800)}
             alt={story.hero_image_alt || story.title}
+            loading="lazy"
+            decoding="async"
             style={styles.cardImageImg}
           />
         </div>

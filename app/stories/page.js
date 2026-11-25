@@ -4,6 +4,10 @@
 import { createClient } from '@supabase/supabase-js';
 import StoriesClient from './StoriesClient';
 
+// Rebuilt in the background at most once an hour, so new content appears
+// here without a manual deploy.
+export const revalidate = 3600;
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -11,7 +15,7 @@ const supabase = createClient(
 
 const TITLE = 'Stories | Open Road Guide';
 const DESC =
-  'Long-reads about the places, people, and history that make the American West worth driving across.';
+  'Long-reads about the places, people, and history behind the roads worth driving.';
 const URL = 'https://openroadguide.com/stories';
 
 export const metadata = {
@@ -25,7 +29,7 @@ export default async function StoriesPage() {
   const [{ data: storyData }, { data: stateData }] = await Promise.all([
     supabase
       .from('stories')
-      .select('*, story_pois(pois(longitude, latitude))')
+      .select('id, slug, title, subtitle, story_type, excerpt, reading_time_minutes, published_at, created_at, featured, hero_image_alt, hero_image_url, hero_image_public_id, author_name, state, story_pois(pois(longitude, latitude))')
       .eq('published', true)
       .order('published_at', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false }),

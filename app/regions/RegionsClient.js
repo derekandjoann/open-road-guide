@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import ShowMore from '../../components/ShowMore';
 import Link from 'next/link';
 import CategoryMap from '../../components/CategoryMap';
 
@@ -29,6 +30,7 @@ export default function RegionsIndexPage({ initialRegions = [], initialStateOpti
   const [stateOptions, setStateOptions] = useState(initialStateOptions);
   // null = "All". Otherwise the canonical state name (e.g. "Nevada").
   const [activeState, setActiveState] = useState(null);
+  const [shownCount, setShownCount] = useState(24);
   const [loading, setLoading] = useState(false);
 
   // Data is seeded from the server render (see page.js); only the ?state=
@@ -46,6 +48,7 @@ export default function RegionsIndexPage({ initialRegions = [], initialStateOpti
   function applyState(option) {
     const name = option ? option.name : null;
     setActiveState(name);
+    setShownCount(24);
 
     const url = new URL(window.location.href);
     if (option) url.searchParams.set('state', option.slug);
@@ -82,7 +85,7 @@ export default function RegionsIndexPage({ initialRegions = [], initialStateOpti
     <main style={styles.main}>
       {/* Breadcrumb */}
       <nav style={styles.breadcrumb}>
-        <Link href="/" style={styles.crumbLink}>
+        <Link href="/" prefetch={false} style={styles.crumbLink}>
           Home
         </Link>
         <span style={styles.crumbSep}>›</span>
@@ -94,7 +97,7 @@ export default function RegionsIndexPage({ initialRegions = [], initialStateOpti
         <div style={styles.eyebrow}>Open Road Guide</div>
         <h1 style={styles.title}>Regions</h1>
         <p style={styles.tagline}>
-          The American West, organized by place — each region gathers the parks,
+          Every state, organized by place — each region gathers the parks,
           towns, drives, and roadside stops that define one corner of the map.
         </p>
       </header>
@@ -139,11 +142,12 @@ export default function RegionsIndexPage({ initialRegions = [], initialStateOpti
         </div>
       ) : (
         <section style={styles.cardsGrid}>
-          {visibleRegions.map((region) => (
+          {visibleRegions.slice(0, shownCount).map((region) => (
             <RegionCard key={region.id} region={region} color={region._color} />
           ))}
         </section>
       )}
+      <ShowMore shown={shownCount} total={visibleRegions.length} onMore={() => setShownCount((n) => n + 24)} label="More regions" />
     </main>
   );
 }
