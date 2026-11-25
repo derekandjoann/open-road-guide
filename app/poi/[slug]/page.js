@@ -6,6 +6,7 @@ import { parseInlineLinks } from '../../../lib/parseInlineLinks';
 import PoiMap from './PoiMap';
 import { heroImage, hasHeroImage, thumbImage, hasThumbImage } from '../../../lib/images';
 import { snippet } from '../../../lib/plainText';
+import { countyHref, countyLabel } from '../../../lib/county';
 
 // Render every POI on demand (server-side) rather than statically at build
 // time. This is deliberate: POI prose lives in Supabase and is edited
@@ -1220,6 +1221,18 @@ export default async function PoiDetailPage({ params }) {
               })}
             </div>
           </section>
+        )}
+
+        {/* Link to this place's county guide (every place and marker in the county). */}
+        {countyHref(poi.state, poi.county) && (
+          <div style={{ marginBottom: '60px' }}>
+            <a
+              href={countyHref(poi.state, poi.county)}
+              style={{ color: '#FF6B6B', fontWeight: 600, fontSize: '15px', textDecoration: 'none' }}
+            >
+              Everything in {countyLabel(poi.county, poi.state)} →
+            </a>
+          </div>
         )}
       </div>
 

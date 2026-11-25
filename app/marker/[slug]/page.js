@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import { cache } from 'react';
 import { toPlainText } from '../../../lib/plainText';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
+import { countyHref, countyLabel } from '../../../lib/county';
 
 // Render every marker page on demand (server-side) rather than statically at
 // build time, matching the POI and route pages. Marker descriptions land in
@@ -184,12 +185,9 @@ export default async function MarkerPage({ params }) {
   const hasCoords =
     typeof marker.latitude === 'number' && typeof marker.longitude === 'number';
   const stSlug = stateSlug(marker.state);
-  const locationBits = [
-    marker.city,
-    marker.county ? `${marker.county} County` : null,
-  ]
-    .filter(Boolean)
-    .join(', ');
+  const cLabel = countyLabel(marker.county, marker.state);
+  const cHref = countyHref(marker.state, marker.county);
+  const locationBits = [marker.city, cLabel].filter(Boolean).join(', ');
   const erectedText = formatErected(marker.erected_by, marker.year_erected);
 
   // ---------- Nearby content ----------
@@ -301,7 +299,12 @@ export default async function MarkerPage({ params }) {
     itemListElement: [
       { '@type': 'ListItem', position: 1, name: 'Home', item: `${BASE}/` },
       { '@type': 'ListItem', position: 2, name: 'Markers', item: `${BASE}/markers` },
-      { '@type': 'ListItem', position: 3, name: marker.name, item: pageUrl },
+      ...(cHref
+        ? [
+            { '@type': 'ListItem', position: 3, name: cLabel, item: `${BASE}${cHref}` },
+            { '@type': 'ListItem', position: 4, name: marker.name, item: pageUrl },
+          ]
+        : [{ '@type': 'ListItem', position: 3, name: marker.name, item: pageUrl }]),
     ],
   };
 
@@ -325,10 +328,18 @@ export default async function MarkerPage({ params }) {
           Home
         </Link>
         <span style={styles.crumbSep}>›</span>
-        <Link href="/markers" style={styles.crumbLink}>
+        <Link href="/markers" prefetch={false} style={styles.crumbLink}>
           Markers
         </Link>
         <span style={styles.crumbSep}>›</span>
+        {cHref && (
+          <>
+            <Link href={cHref} prefetch={false} style={styles.crumbLink}>
+              {cLabel}
+            </Link>
+            <span style={styles.crumbSep}>›</span>
+          </>
+        )}
         <span style={styles.crumbCurrent}>{marker.name}</span>
       </nav>
 

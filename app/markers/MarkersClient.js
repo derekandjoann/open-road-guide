@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import MapView from '../../components/MapView';
+import { countyHref } from '../../lib/county';
 
 // Open Road Guide brand palette
 const COLORS = {
@@ -303,6 +304,15 @@ export default function MarkersIndexPage({ initialCounties = [], initialStateOpt
             {countyLabel(activeCounty.county, activeCounty.state)}
             <span style={styles.countyState}> · {activeCounty.state}</span>
           </h2>
+          {countyHref(activeCounty.state, activeCounty.county) && (
+            <Link
+              href={countyHref(activeCounty.state, activeCounty.county)}
+              prefetch={false}
+              style={{ ...styles.pageLink, display: 'inline-block', marginBottom: '0.75rem' }}
+            >
+              Open the county guide →
+            </Link>
+          )}
           <div style={styles.resultMeta}>
             {loading
               ? 'Loading markers…'
