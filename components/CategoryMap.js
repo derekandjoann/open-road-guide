@@ -4,7 +4,7 @@
 // page. One component, three modes: it draws every published route line, every
 // region footprint, or every story pin, each one clickable through to its page.
 //
-// It deliberately reuses the same keyless OpenStreetMap raster basemap as
+// It deliberately reuses the same keyless OpenFreeMap basemap (lib/basemap.js) as
 // components/MapView.js so these maps match /explore and the detail pages
 // exactly. MapView is built for a single route + its stops; this is its
 // many-at-once sibling, kept separate so editing it can never regress MapView.
@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { BASEMAP_STYLE } from '../lib/basemap';
 
 // Story-type pin colors. History/Culture/Nature reuse brand hues; Geology uses
 // a darker amber than the brand yellow so a pin reads against a light basemap.
@@ -30,27 +31,7 @@ const REGION_COLORS = [
   '#3E6FB0', '#6A5BAE', '#8E4FA0', '#B5468A', '#C24E6A', '#7C6A55', '#5B8C7B',
 ];
 
-// Same OSM raster basemap as MapView, so the look is consistent site-wide.
-const BASEMAP_STYLE = {
-  version: 8,
-  name: 'Open Road Guide',
-  sources: {
-    'osm-tiles': {
-      type: 'raster',
-      tiles: [
-        'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-        'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
-        'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      ],
-      tileSize: 256,
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    },
-  },
-  layers: [
-    { id: 'osm-tiles', type: 'raster', source: 'osm-tiles', minzoom: 0, maxzoom: 19 },
-  ],
-};
+// The basemap (lib/basemap.js) is shared with MapView, so the look is consistent site-wide.
 
 // ---------------------------------------------------------------------------
 // Region "puzzle" geometry. Each region becomes one piece of a tessellation
