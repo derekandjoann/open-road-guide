@@ -6,6 +6,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { getCategoryColor, getCategoryEmoji } from '../../lib/categoryColors';
 import { thumbImage, hasThumbImage } from '../../lib/images';
+import { BASEMAP_STYLE } from '../../lib/basemap';
 
 // Regions carry no category; give each a stable color by cycling the brand palette.
 const REGION_PALETTE = ['#ff6b5b', '#12b5a0', '#ffb627', '#7c5cfc', '#f59e0b'];
@@ -79,23 +80,7 @@ export default function MapPage() {
     if (mapRef.current || !mapContainer.current) return;
     const map = new maplibregl.Map({
       container: mapContainer.current,
-      style: {
-        version: 8,
-        name: 'Open Road Guide',
-        sources: {
-          'osm-tiles': {
-            type: 'raster',
-            tiles: [
-              'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-              'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
-              'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            ],
-            tileSize: 256,
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-          },
-        },
-        layers: [{ id: 'osm-tiles', type: 'raster', source: 'osm-tiles', minzoom: 0, maxzoom: 19 }],
-      },
+      style: BASEMAP_STYLE,
       center: [-111.55, 39.3],
       zoom: 5.7,
       attributionControl: true,

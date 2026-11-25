@@ -14,6 +14,8 @@ import { fetchAll } from '../../../lib/fetchAll';
 //   /api/data?kind=marker&id=<uuid>     → one marker's long text
 //   /api/data?kind=marker-county&state=&county= → light rows for one county
 //   /api/data?kind=marker-search&q=&state=      → up to 60 markers by name/town/county
+//   /api/data?kind=site-search&q=        → places, markers, drives, stories, regions, towns
+//   /api/data?kind=near&lat=&lng=        → 12 nearest places and 12 nearest told markers
 //
 // The map's marker dots come from /api/marker-points (cached on the CDN).
 //
@@ -146,6 +148,28 @@ export async function GET(request) {
     const { data, error } = await supabase.rpc('markers_search', { q, p_state: state, max_results: 60 });
     if (error) return json({ error: 'search failed' }, 503);
     return json(data || [], 200);
+  }
+
+  // -------------------------------------------------------- site-search
+  if (kind === 'site-search') {
+    const q = (searchParams.get('q') || '').trim().slice(0, 80);
+    if (q.length < 2) return json({}, 200);
+    const { data, error } = await supabase.rpc('site_search', { q });
+    if (error) return json({ error: 'search failed' }, 503);
+    return json(data || {}, 200);
+  }
+
+  // --------------------------------------------------------------- near
+  if (kind === 'near') {
+    const lat = Number(searchParams.get('lat'));
+    const lng = Number(searchParams.get('lng'));
+    const valid =
+      Number.isFinite(lat) && Number.isFinite(lng) &&
+      lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+    if (!valid) return json({ error: 'bad coordinates' }, 400);
+    const { data, error } = await supabase.rpc('near_point', { p_lat: lat, p_lng: lng });
+    if (error) return json({ error: 'lookup failed' }, 503);
+    return json(data || { places: [], markers: [] }, 200);
   }
 
   return json({ error: 'unknown kind' }, 404);
