@@ -2,12 +2,20 @@ import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
 import MarkerMap from './MarkerMap';
 import { notFound } from 'next/navigation';
+import { cache } from 'react';
 
 // Render every marker page on demand (server-side) rather than statically at
 // build time, matching the POI and route pages. Marker descriptions land in
 // Supabase daily as the writing campaign rolls — a described marker's page
 // exists the moment its prose does, with no deploy.
-export const dynamic = 'force-dynamic';
+// Pages are built on a visitor's first request, then served from the cache
+// and rebuilt in the background at most once an hour, so a database edit
+// shows up within the hour with no deploy, and the database isn't asked
+// again on every view.
+export const revalidate = 3600;
+export async function generateStaticParams() {
+  return [];
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -28,17 +36,24 @@ const BASE = 'https://openroadguide.com';
 
 // Only markers that carry an editorial description get pages — the quality
 // bar is the point. Everything else stays map-only.
-async function fetchMarkerBySlug(slug, columns = '*') {
+// One read per page view: cache() shares the row between the page and its
+// metadata instead of asking the database twice.
+const MARKER_COLS =
+  'id, name, slug, latitude, longitude, erected_by, year_erected, note, source, external_id, city, county, theme, commemorates, marker_type, source_url, hmdb_url, state, description, inscription, parked, facet';
+
+const fetchMarkerBySlug = cache(async (slug) => {
   const { data } = await supabase
     .from('markers')
-    .select(columns)
+    .select(MARKER_COLS)
     .eq('slug', slug)
     .not('description', 'is', null)
     .neq('description', '')
+    // Parked markers were taken off the site: they 404 like any missing page.
+    .or('parked.is.null,parked.eq.false')
     .maybeSingle();
 
   return data || null;
-}
+});
 
 function stateSlug(name) {
   return (name || '').toLowerCase().trim().replace(/\s+/g, '-');
@@ -128,7 +143,7 @@ function metaDescription(text, max = 160) {
 export async function generateMetadata({ params }) {
   const { slug } = await params;
 
-  const marker = await fetchMarkerBySlug(slug, 'name, description, state');
+  const marker = await fetchMarkerBySlug(slug);
 
   if (!marker) {
     return { title: { absolute: 'Marker not found | Open Road Guide' } };
@@ -195,17 +210,14 @@ export default async function MarkerPage({ params }) {
         .lte('latitude', marker.latitude + dLat)
         .gte('longitude', marker.longitude - dLng)
         .lte('longitude', marker.longitude + dLng),
-      supabase
-        .from('markers')
-        .select('name, slug, latitude, longitude')
-        .neq('id', marker.id)
-        .not('description', 'is', null)
-        .neq('description', '')
-        .not('slug', 'is', null)
-        .gte('latitude', marker.latitude - dLat)
-        .lte('latitude', marker.latitude + dLat)
-        .gte('longitude', marker.longitude - dLng)
-        .lte('longitude', marker.longitude + dLng),
+      // Indexed nearest-neighbour lookup (markers_near_point) instead of a
+      // bounding-box scan; returns only markers that have pages.
+      supabase.rpc('markers_near_point', {
+        p_lat: marker.latitude,
+        p_lng: marker.longitude,
+        max_results: 4,
+        exclude_slug: marker.slug,
+      }),
     ]);
 
     const withMiles = (rows) =>
@@ -225,7 +237,7 @@ export default async function MarkerPage({ params }) {
         .sort((a, b) => a.miles - b.miles);
 
     nearbyPois = withMiles(poiRes.data).slice(0, 4);
-    nearbyMarkers = withMiles(markerRes.data).slice(0, 4);
+    nearbyMarkers = withMiles(markerRes.data).filter((r) => r.miles <= 30).slice(0, 4);
   }
 
   // Split the editorial description into paragraphs, mirroring the POI and
@@ -307,7 +319,7 @@ export default async function MarkerPage({ params }) {
 
       {/* Breadcrumb */}
       <nav style={styles.breadcrumb}>
-        <Link href="/" style={styles.crumbLink}>
+        <Link href="/" prefetch={false} style={styles.crumbLink}>
           Home
         </Link>
         <span style={styles.crumbSep}>›</span>

@@ -90,11 +90,11 @@ export default function Footer() {
     <footer style={s.footer}>
       <div style={s.inner}>
         <div style={s.brandCol}>
-          <Link href="/" style={s.logo}>
+          <Link href="/" prefetch={false} style={s.logo}>
             Open Road Guide
           </Link>
           <p style={s.brandBlurb}>
-            An editorial road-trip guide to the American West — the drives, the
+            An editorial road-trip guide, state by state — the drives, the
             places, and the roadside history worth pulling over for. Researched,
             written, and driven one state at a time.
           </p>
@@ -104,19 +104,19 @@ export default function Footer() {
           <h2 style={s.colHeading}>Explore</h2>
           <ul style={s.linkList}>
             <li style={s.linkItem}>
-              <Link href="/explore" style={s.link}>The Map</Link>
+              <Link href="/explore" prefetch={false} style={s.link}>The Map</Link>
             </li>
             <li style={s.linkItem}>
-              <Link href="/routes" style={s.link}>Scenic Drives</Link>
+              <Link href="/routes" prefetch={false} style={s.link}>Scenic Drives</Link>
             </li>
             <li style={s.linkItem}>
-              <Link href="/stories" style={s.link}>Stories</Link>
+              <Link href="/stories" prefetch={false} style={s.link}>Stories</Link>
             </li>
             <li style={s.linkItem}>
-              <Link href="/regions" style={s.link}>Regions</Link>
+              <Link href="/regions" prefetch={false} style={s.link}>Regions</Link>
             </li>
             <li style={s.linkItem}>
-              <Link href="/markers" style={s.link}>Historical Markers</Link>
+              <Link href="/markers" prefetch={false} style={s.link}>Historical Markers</Link>
             </li>
           </ul>
         </nav>

@@ -4,6 +4,10 @@
 import { createClient } from '@supabase/supabase-js';
 import RoutesClient from './RoutesClient';
 
+// Rebuilt in the background at most once an hour, so new content appears
+// here without a manual deploy.
+export const revalidate = 3600;
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -24,7 +28,7 @@ function routeInState(route, stateName) {
 
 const TITLE = 'Routes | Open Road Guide';
 const DESC =
-  'Long-form road trip guides through the American West — every stop, every story, every mile that makes the drive worth taking.';
+  'Long-form road trip guides across the country — every stop, every story, every mile that makes the drive worth taking.';
 const URL = 'https://openroadguide.com/routes';
 
 export const metadata = {
@@ -36,7 +40,7 @@ export const metadata = {
 
 export default async function RoutesPage() {
   const [{ data: routeData }, { data: stateData }] = await Promise.all([
-    supabase.from('routes').select('*').eq('published', true).order('name', { ascending: true }),
+    supabase.from('routes').select('id, slug, name, state, short_description, hero_image_url, hero_image_alt, hero_image_public_id, total_miles, estimated_drive_hours, best_seasons, difficulty, crossing_states, path_geojson').eq('published', true).order('name', { ascending: true }),
     supabase.from('states').select('slug, name').eq('published', true).order('sort_order', { ascending: true }),
   ]);
 

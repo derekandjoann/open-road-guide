@@ -5,6 +5,10 @@
 import { createClient } from '@supabase/supabase-js';
 import RegionsClient from './RegionsClient';
 
+// Rebuilt in the background at most once an hour, so new content appears
+// here without a manual deploy.
+export const revalidate = 3600;
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -19,7 +23,7 @@ const REGION_COLORS = [
 
 const TITLE = 'Regions | Open Road Guide';
 const DESC =
-  'Explore the American West by region — each one gathers the parks, towns, scenic drives, and roadside stops that define a single corner of the map.';
+  'Explore every state by region — each one gathers the parks, towns, scenic drives, and roadside stops that define a single corner of the map.';
 const URL = 'https://openroadguide.com/regions';
 
 export const metadata = {
@@ -33,7 +37,7 @@ export default async function RegionsPage() {
   const [{ data: regionData }, { data: stateData }] = await Promise.all([
     supabase
       .from('regions')
-      .select('*, region_pois(pois(longitude, latitude))')
+      .select('id, slug, name, state, short_description, hero_image_url, hero_image_alt, hero_image_public_id, region_pois(pois(longitude, latitude))')
       .eq('published', true)
       .order('name', { ascending: true }),
     supabase

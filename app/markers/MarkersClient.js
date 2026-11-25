@@ -17,18 +17,21 @@ const COLORS = {
 
 const MARKER_VIOLET = '#9D4EDD';
 
-export default function MarkersIndexPage({ initialMarkers = [], initialStateOptions = [] }) {
-  // Light marker set (no description/inscription text — those load on demand).
-  const [markers, setMarkers] = useState(initialMarkers);
-  // [{ slug, name }] in states-table order, intersected with states that have
-  // markers — drives the state lens, same slug language as the rest of the site.
-  const [stateOptions, setStateOptions] = useState(initialStateOptions);
+export default function MarkersIndexPage({ initialCounties = [], initialStateOptions = [] }) {
+  // County index rows from the server: [{ state, county, count }].
+  const counties0 = initialCounties;
+  // [{ slug, name }] in states-table order, only states that have markers.
+  const stateOptions = initialStateOptions;
   // null = "All states". Otherwise the canonical state name (e.g. "Nevada").
   const [activeState, setActiveState] = useState(null);
   // null = county index. Otherwise { state, county } — the open county view.
   const [activeCounty, setActiveCounty] = useState(null);
+  const [countyMarkers, setCountyMarkers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState(null);
+  const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   // Read-more machinery. details caches the lazily-fetched long text by id;
   // expanded tracks which cards are open; detailLoading guards in-flight fetches.
@@ -36,27 +39,94 @@ export default function MarkersIndexPage({ initialMarkers = [], initialStateOpti
   const [expanded, setExpanded] = useState(() => new Set());
   const [detailLoading, setDetailLoading] = useState(() => new Set());
 
-  // Data is seeded from the server render (see page.js); only the ?state=
-  // deep-link needs the browser. Match it against the seeded roster once.
+  const totalMarkers = useMemo(() => counties0.reduce((n, c) => n + c.count, 0), [counties0]);
+
+  // Deep links: ?state=texas and ?state=texas&county=Travis open straight to that view.
   useEffect(() => {
-    const wanted = (new URLSearchParams(window.location.search).get('state') || '').toLowerCase();
+    const params = new URLSearchParams(window.location.search);
+    const wanted = (params.get('state') || '').toLowerCase();
     const match = stateOptions.find((s) => s.slug === wanted);
-    if (match) setActiveState(match.name);
+    if (!match) return;
+    setActiveState(match.name);
+    const county = params.get('county');
+    if (county && counties0.some((c) => c.state === match.name && c.county === county)) {
+      openCounty(match.name, county, false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function writeUrl(stateName, county) {
+    const url = new URL(window.location.href);
+    const opt = stateOptions.find((s) => s.name === stateName);
+    if (opt) url.searchParams.set('state', opt.slug);
+    else url.searchParams.delete('state');
+    if (county) url.searchParams.set('county', county);
+    else url.searchParams.delete('county');
+    window.history.replaceState({}, '', url);
+  }
 
-  // Apply a state lens. Resets the open county (counties are state-specific) and
-  // writes ?state to the URL so the view is shareable and deep-links round-trip.
+  // Apply a state lens. Resets the open county (counties are state-specific).
   function applyState(option) {
     const name = option ? option.name : null;
     setActiveState(name);
     setActiveCounty(null);
-    const url = new URL(window.location.href);
-    if (option) url.searchParams.set('state', option.slug);
-    else url.searchParams.delete('state');
-    window.history.replaceState({}, '', url);
+    writeUrl(name, null);
   }
+
+  async function openCounty(state, county, updateUrl = true) {
+    setActiveCounty({ state, county });
+    setCountyMarkers([]);
+    setLoadError(false);
+    setLoading(true);
+    if (updateUrl) writeUrl(state, county);
+    try {
+      const res = await fetch(
+        `/api/data?kind=marker-county&state=${encodeURIComponent(state)}&county=${encodeURIComponent(county)}`
+      );
+      if (!res.ok) throw new Error(String(res.status));
+      const rows = await res.json();
+      setCountyMarkers(Array.isArray(rows) ? rows : []);
+    } catch {
+      setLoadError(true);
+    }
+    setLoading(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function closeCounty() {
+    setActiveCounty(null);
+    writeUrl(activeState, null);
+  }
+
+  // Search runs in the database (all markers, not just one page of them),
+  // a quarter-second after typing stops.
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      setSearchResults(null);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      let rows = [];
+      try {
+        const stateParam = activeState ? `&state=${encodeURIComponent(activeState)}` : '';
+        const res = await fetch(`/api/data?kind=marker-search&q=${encodeURIComponent(q)}${stateParam}`);
+        if (res.ok) rows = await res.json();
+      } catch {
+        rows = [];
+      }
+      if (cancelled) return;
+      setSearchResults(Array.isArray(rows) ? rows : []);
+      setSearching(false);
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery, activeState]);
 
   // Toggle a card's read-more, lazily fetching the long text the first time.
   async function toggleExpand(id) {
@@ -70,14 +140,12 @@ export default function MarkersIndexPage({ initialMarkers = [], initialStateOpti
     }
     if (!details[id] && !detailLoading.has(id)) {
       setDetailLoading((prev) => new Set(prev).add(id));
-      // Single-row read through our own route: no credential in the browser,
-      // and no way to widen this into a dump of the whole markers table.
       let data = null;
       try {
         const res = await fetch(`/api/data?kind=marker&id=${encodeURIComponent(id)}`);
         if (res.ok) data = await res.json();
       } catch {
-        // Falls through to empty strings below, same as a failed query before.
+        // Falls through to empty strings below.
       }
       setDetails((prev) => ({
         ...prev,
@@ -95,75 +163,62 @@ export default function MarkersIndexPage({ initialMarkers = [], initialStateOpti
     setExpanded((prev) => new Set(prev).add(id));
   }
 
-  // Sort key for states, by states-table order (Utah before Nevada, etc.).
+  // Sort key for states, by states-table order.
   const stateOrder = useMemo(() => {
     const m = new Map();
     stateOptions.forEach((s, i) => m.set(s.name, i));
     return m;
   }, [stateOptions]);
 
-  const scopedMarkers = useMemo(
-    () => (activeState ? markers.filter((m) => m.state === activeState) : markers),
-    [markers, activeState]
-  );
-
-  // County index: one entry per (state, county), with a count.
   const counties = useMemo(() => {
-    const map = new Map();
-    for (const m of scopedMarkers) {
-      const key = `${m.state}|${m.county}`;
-      if (!map.has(key)) map.set(key, { state: m.state, county: m.county, count: 0 });
-      map.get(key).count += 1;
-    }
-    return [...map.values()].sort((a, b) => {
+    const list = activeState ? counties0.filter((c) => c.state === activeState) : counties0.slice();
+    return list.sort((a, b) => {
       const so = (stateOrder.get(a.state) ?? 99) - (stateOrder.get(b.state) ?? 99);
       return so !== 0 ? so : a.county.localeCompare(b.county);
     });
-  }, [scopedMarkers, stateOrder]);
+  }, [counties0, activeState, stateOrder]);
 
-  const countyMarkers = useMemo(() => {
-    if (!activeCounty) return [];
-    return markers
-      .filter((m) => m.state === activeCounty.state && m.county === activeCounty.county)
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [markers, activeCounty]);
+  // Group the county index by state when no state is chosen, so 1,900+
+  // counties read as state sections instead of one long wall.
+  const countyGroups = useMemo(() => {
+    const groups = [];
+    let cur = null;
+    for (const c of counties) {
+      if (!cur || cur.state !== c.state) {
+        cur = { state: c.state, total: 0, items: [] };
+        groups.push(cur);
+      }
+      cur.items.push(c);
+      cur.total += c.count;
+    }
+    return groups;
+  }, [counties]);
 
-  // Map points for the county view — markers ride in as POIs so MapView frames
-  // and renders them; markerColor forces the violet historical-marker hue.
   const countyMapPois = useMemo(
     () =>
-      countyMarkers.map((m) => ({
-        id: m.id,
-        name: m.name,
-        longitude: m.longitude,
-        latitude: m.latitude,
-        category: m.theme,
-        tagline: m.note || m.commemorates || null,
-        href: m.has_description && m.slug ? `/marker/${m.slug}` : null,
-      })),
+      countyMarkers
+        .filter((m) => m.latitude != null && m.longitude != null)
+        .map((m) => ({
+          id: m.id,
+          name: m.name,
+          longitude: m.longitude,
+          latitude: m.latitude,
+          category: m.theme,
+          tagline: m.note || m.commemorates || null,
+          href: m.has_description && m.slug ? `/marker/${m.slug}` : null,
+        })),
     [countyMarkers]
   );
 
-  const searchResults = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return null;
-    return scopedMarkers
-      .filter(
-        (m) =>
-          m.name.toLowerCase().includes(q) ||
-          (m.county && m.county.toLowerCase().includes(q)) ||
-          (m.theme && m.theme.toLowerCase().includes(q))
-      )
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [searchQuery, scopedMarkers]);
-
-  const showStateTag = activeState === null;
+  const scopedTotal = activeState
+    ? counties.reduce((n, c) => n + c.count, 0)
+    : totalMarkers;
 
   return (
     <main style={styles.main}>
       {/* Breadcrumb */}
       <nav style={styles.breadcrumb}>
-        <Link href="/" style={styles.crumbLink}>Home</Link>
+        <Link href="/" prefetch={false} style={styles.crumbLink}>Home</Link>
         <span style={styles.crumbSep}>›</span>
         <span style={styles.crumbCurrent}>Historical Markers</span>
       </nav>
@@ -173,12 +228,12 @@ export default function MarkersIndexPage({ initialMarkers = [], initialStateOpti
         <div style={styles.eyebrow}>Open Road Guide</div>
         <h1 style={styles.title}>Historical Markers</h1>
         <p style={styles.tagline}>
-          Roadside history, marker by marker — the plaques and monuments where the
-          West records what happened here, browsable by state and county.
+          Roadside history, marker by marker: what happened here, browsable by
+          state and county, or searchable by name and town.
         </p>
-        {!loading && markers.length > 0 && (
+        {totalMarkers > 0 && (
           <div style={styles.statLine}>
-            {markers.length.toLocaleString()} markers
+            {totalMarkers.toLocaleString()} markers
             {stateOptions.length > 0 ? ` across ${stateOptions.length} state${stateOptions.length === 1 ? '' : 's'}` : ''}
           </div>
         )}
@@ -188,7 +243,7 @@ export default function MarkersIndexPage({ initialMarkers = [], initialStateOpti
       <div style={styles.searchWrap}>
         <input
           type="text"
-          placeholder="Search markers by name, county, or theme…"
+          placeholder="Search markers by name, town or county…"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           style={styles.searchInput}
@@ -196,7 +251,7 @@ export default function MarkersIndexPage({ initialMarkers = [], initialStateOpti
       </div>
 
       {/* State lens */}
-      {!loading && stateOptions.length > 1 && (
+      {stateOptions.length > 1 && (
         <div style={styles.filterRow} role="group" aria-label="Filter markers by state">
           <StateChip label="All" active={activeState === null} onClick={() => applyState(null)} />
           {stateOptions.map((s) => (
@@ -211,24 +266,24 @@ export default function MarkersIndexPage({ initialMarkers = [], initialStateOpti
       )}
 
       {/* Body */}
-      {loading ? (
-        <div style={styles.loading}>Loading markers…</div>
-      ) : searchResults !== null ? (
+      {searchResults !== null || searching ? (
         // ---- Search view ----
         <section>
           <div style={styles.resultMeta}>
-            {searchResults.length} {searchResults.length === 1 ? 'marker' : 'markers'} matching
-            {' '}&ldquo;{searchQuery.trim()}&rdquo;
+            {searching
+              ? 'Searching…'
+              : `${searchResults.length}${searchResults.length >= 60 ? '+' : ''} ${searchResults.length === 1 ? 'marker' : 'markers'} matching “${searchQuery.trim()}”${activeState ? ` in ${activeState}` : ''}`}
           </div>
-          {searchResults.length === 0 ? (
+          {!searching && searchResults.length === 0 ? (
             <div style={styles.loading}>No markers match that search.</div>
           ) : (
             <div style={styles.markerList}>
-              {searchResults.map((m) => (
+              {(searchResults || []).map((m) => (
                 <MarkerCard
                   key={m.id}
                   marker={m}
                   showCounty
+                  showState={!activeState}
                   expanded={expanded.has(m.id)}
                   loading={detailLoading.has(m.id)}
                   detail={details[m.id]}
@@ -241,16 +296,22 @@ export default function MarkersIndexPage({ initialMarkers = [], initialStateOpti
       ) : activeCounty ? (
         // ---- County view ----
         <section>
-          <button type="button" onClick={() => setActiveCounty(null)} style={styles.backBtn}>
+          <button type="button" onClick={closeCounty} style={styles.backBtn}>
             ← All counties
           </button>
           <h2 style={styles.countyHeading}>
-            {activeCounty.county} County
+            {countyLabel(activeCounty.county, activeCounty.state)}
             <span style={styles.countyState}> · {activeCounty.state}</span>
           </h2>
           <div style={styles.resultMeta}>
-            {countyMarkers.length} {countyMarkers.length === 1 ? 'marker' : 'markers'}
+            {loading
+              ? 'Loading markers…'
+              : `${countyMarkers.length} ${countyMarkers.length === 1 ? 'marker' : 'markers'}`}
           </div>
+
+          {loadError && (
+            <div style={styles.loading}>These markers could not be loaded. Please try again.</div>
+          )}
 
           {countyMapPois.length > 0 && (
             <div style={styles.mapSection}>
@@ -277,22 +338,38 @@ export default function MarkersIndexPage({ initialMarkers = [], initialStateOpti
           {counties.length === 0 ? (
             <div style={styles.loading}>No markers here yet.</div>
           ) : (
-            <div style={styles.countyGrid}>
-              {counties.map((c) => (
-                <button
-                  key={`${c.state}|${c.county}`}
-                  type="button"
-                  onClick={() => setActiveCounty({ state: c.state, county: c.county })}
-                  style={styles.countyCard}
-                >
-                  {showStateTag && <div style={styles.countyCardState}>{c.state}</div>}
-                  <div style={styles.countyCardName}>{c.county} County</div>
-                  <div style={styles.countyCardCount}>
-                    {c.count} {c.count === 1 ? 'marker' : 'markers'}
+            <>
+              {activeState && (
+                <div style={styles.resultMeta}>
+                  {scopedTotal.toLocaleString()} markers in {counties.length} {counties.length === 1 ? 'county' : 'counties'}
+                </div>
+              )}
+              {countyGroups.map((g) => (
+                <div key={g.state} style={{ marginBottom: '2rem' }}>
+                  {!activeState && (
+                    <h2 style={styles.groupHeading}>
+                      {g.state}
+                      <span style={styles.countyState}> · {g.total.toLocaleString()} markers</span>
+                    </h2>
+                  )}
+                  <div style={styles.countyGrid}>
+                    {g.items.map((c) => (
+                      <button
+                        key={`${c.state}|${c.county}`}
+                        type="button"
+                        onClick={() => openCounty(c.state, c.county)}
+                        style={styles.countyCard}
+                      >
+                        <div style={styles.countyCardName}>{countyLabel(c.county, c.state)}</div>
+                        <div style={styles.countyCardCount}>
+                          {c.count} {c.count === 1 ? 'marker' : 'markers'}
+                        </div>
+                      </button>
+                    ))}
                   </div>
-                </button>
+                </div>
               ))}
-            </div>
+            </>
           )}
         </section>
       )}
@@ -301,6 +378,14 @@ export default function MarkersIndexPage({ initialMarkers = [], initialStateOpti
 }
 
 // ---- Sub-components ----
+
+// Louisiana has parishes, Alaska boroughs; "Unknown" gets no suffix, and a
+// county name that already ends in County/Parish/City keeps its own word.
+function countyLabel(county, state) {
+  if (!county || county === 'Unknown') return 'County not recorded';
+  if (/\b(county|parish|borough|city)$/i.test(county)) return county;
+  return `${county} ${state === 'Louisiana' ? 'Parish' : 'County'}`;
+}
 
 function StateChip({ label, active, onClick }) {
   return (
@@ -315,13 +400,14 @@ function StateChip({ label, active, onClick }) {
   );
 }
 
-function MarkerCard({ marker, detail, expanded, loading, onToggle, showCounty = false }) {
+function MarkerCard({ marker, detail, expanded, loading, onToggle, showCounty = false, showState = false }) {
   const m = marker;
   const teaser = m.note || m.commemorates || null;
   const metaBits = [
     m.marker_type,
     m.city,
-    showCounty ? `${m.county} County` : null,
+    showCounty && m.county ? countyLabel(m.county, m.state) : null,
+    showState ? m.state : null,
     m.year,
   ].filter(Boolean);
   const canExpand = m.has_description || m.has_inscription;
@@ -539,7 +625,14 @@ const styles = {
     margin: '0 0 0.3rem 0',
     color: COLORS.ink,
   },
-  countyState: { color: COLORS.warmGray, fontWeight: 400 },
+  countyState: { color: COLORS.warmGray, fontWeight: 400, fontSize: '0.7em' },
+  groupHeading: {
+    fontFamily: "'Fraunces', Georgia, serif",
+    fontSize: 'clamp(1.4rem, 4vw, 1.9rem)',
+    fontWeight: 600,
+    margin: '0 0 0.9rem 0',
+    color: COLORS.ink,
+  },
   resultMeta: {
     fontSize: '0.85rem',
     fontWeight: 600,

@@ -4,8 +4,8 @@ import Nav from '../components/nav';
 import Footer from '../components/footer';
 
 export const metadata = {
-  title: 'Open Road Guide — Road Trip Guides to the American West',
-  description: 'Your road trip companion for the American West — interactive maps, scenic drives, regional guides, and the roadside history worth pulling over for.',
+  title: 'Open Road Guide — Road Trip Guides, State by State',
+  description: 'Your road trip companion, state by state: interactive maps, scenic drives, regional guides, and the roadside history worth pulling over for.',
 };
 
 // Site-wide structured data: Organization (who publishes this) and WebSite
@@ -26,7 +26,7 @@ const siteJsonLd = JSON.stringify([
     name: 'Open Road Guide',
     url: 'https://openroadguide.com',
     description:
-      'Road trip guides to the American West — interactive maps, scenic drives, regional guides, and the roadside history worth pulling over for.',
+      'Road trip guides, state by state: interactive maps, scenic drives, regional guides, and the roadside history worth pulling over for.',
   },
 ]).replace(/</g, '\\u003c');
 

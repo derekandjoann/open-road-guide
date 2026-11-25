@@ -1,4 +1,5 @@
 import { supabase } from '../../../lib/supabase';
+import { fetchAll } from '../../../lib/fetchAll';
 
 // One server-side data route for everything the interactive pages need.
 //
@@ -11,6 +12,10 @@ import { supabase } from '../../../lib/supabase';
 //   /api/data?kind=nearme&lat=&lng=     → 8 nearest published POIs
 //   /api/data?kind=search&q=            → POI search
 //   /api/data?kind=marker&id=<uuid>     → one marker's long text
+//   /api/data?kind=marker-county&state=&county= → light rows for one county
+//   /api/data?kind=marker-search&q=&state=      → up to 60 markers by name/town/county
+//
+// The map's marker dots come from /api/marker-points (cached on the CDN).
 //
 // Nothing here accepts a table name, a column list, or a row limit from the
 // caller. The shapes below are the only shapes this route can ever return.
@@ -29,7 +34,7 @@ const json = (body, status) =>
     status,
     headers: {
       'Cache-Control': 'no-store',
-      'Netlify-Vary': 'query=kind|q|id|lat|lng',
+      'Netlify-Vary': 'query=kind|q|id|lat|lng|state|county',
     },
   });
 
@@ -39,14 +44,17 @@ export async function GET(request) {
 
   // ---------------------------------------------------------------- map
   if (kind === 'map') {
-    const [poiR, routeR, regionR, regionPoiR, storyR, storyPoiR, markerR] = await Promise.all([
-      supabase.from('pois').select('id,slug,name,latitude,longitude,category,tagline,thumbnail_url,thumbnail_public_id').eq('published', true),
-      supabase.from('routes').select('slug,name,total_miles,short_description,path_geojson').eq('published', true),
-      supabase.from('regions').select('id,slug,name,short_description,bounds').eq('published', true),
-      supabase.from('region_pois').select('region_id,poi_id'),
-      supabase.from('stories').select('id,slug,title,story_type,excerpt').eq('published', true),
-      supabase.from('story_pois').select('story_id,poi_id,sort_order'),
-      supabase.rpc('markers_overlay'),
+    // Every list is read in pages: the database returns at most 1,000 rows
+    // per request, and places, region links and story links are past that.
+    const all = (build) =>
+      fetchAll(build).then((data) => ({ data, error: null })).catch((error) => ({ data: [], error }));
+    const [poiR, routeR, regionR, regionPoiR, storyR, storyPoiR] = await Promise.all([
+      all((f, t) => supabase.from('pois').select('id,slug,name,latitude,longitude,category,tagline,thumbnail_url,thumbnail_public_id').eq('published', true).order('id').range(f, t)),
+      all((f, t) => supabase.from('routes').select('slug,name,total_miles,short_description,path_geojson').eq('published', true).order('slug').range(f, t)),
+      all((f, t) => supabase.from('regions').select('id,slug,name,short_description,bounds').eq('published', true).order('id').range(f, t)),
+      all((f, t) => supabase.from('region_pois').select('region_id,poi_id').order('region_id').order('poi_id').range(f, t)),
+      all((f, t) => supabase.from('stories').select('id,slug,title,story_type,excerpt').eq('published', true).order('id').range(f, t)),
+      all((f, t) => supabase.from('story_pois').select('story_id,poi_id,sort_order').order('story_id').order('poi_id').range(f, t)),
     ]);
 
     // POIs are the spine — without them nothing else can be placed.
@@ -61,7 +69,6 @@ export async function GET(request) {
         regionPois: regionPoiR.error ? [] : regionPoiR.data || [],
         stories: storyR.error ? [] : storyR.data || [],
         storyPois: storyPoiR.error ? [] : storyPoiR.data || [],
-        markers: markerR.error ? null : markerR.data || null,
       },
       200);
   }
@@ -117,6 +124,28 @@ export async function GET(request) {
     return json(
       { description: data?.description || '', inscription: data?.inscription || '' },
       200);
+  }
+
+  // ------------------------------------------------------- marker-county
+  if (kind === 'marker-county') {
+    const state = (searchParams.get('state') || '').trim().slice(0, 60);
+    const county = (searchParams.get('county') || '').trim().slice(0, 80);
+    if (!state || !county) return json({ error: 'state and county required' }, 400);
+
+    const { data, error } = await supabase.rpc('markers_in_county', { p_state: state, p_county: county });
+    if (error) return json({ error: 'lookup failed' }, 503);
+    return json((data || []).map((m) => ({ ...m, state, county })), 200);
+  }
+
+  // ------------------------------------------------------- marker-search
+  if (kind === 'marker-search') {
+    const q = (searchParams.get('q') || '').trim().slice(0, 120);
+    const state = (searchParams.get('state') || '').trim().slice(0, 60) || null;
+    if (q.length < 2) return json([], 200);
+
+    const { data, error } = await supabase.rpc('markers_search', { q, p_state: state, max_results: 60 });
+    if (error) return json({ error: 'search failed' }, 503);
+    return json(data || [], 200);
   }
 
   return json({ error: 'unknown kind' }, 404);

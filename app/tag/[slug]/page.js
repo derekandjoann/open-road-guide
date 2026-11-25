@@ -5,7 +5,14 @@ import { createClient } from '@supabase/supabase-js';
 // Render on demand, server-side (matching the POI, route, and marker pages).
 // Tag prose and tagged POIs land in Supabase continuously; a tag's page
 // reflects the current data the moment it's requested, with no deploy.
-export const dynamic = 'force-dynamic';
+// Pages are built on a visitor's first request, then served from the cache
+// and rebuilt in the background at most once an hour, so a database edit
+// shows up within the hour with no deploy, and the database isn't asked
+// again on every view.
+export const revalidate = 3600;
+export async function generateStaticParams() {
+  return [];
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -96,7 +103,7 @@ export async function generateMetadata({ params }) {
   const description = (
     tag.meta_description ||
     tag.description ||
-    `Places tagged ${tag.name} across the American West.`
+    `Places tagged ${tag.name} on Open Road Guide.`
   ).slice(0, 300);
   const url = `${BASE}/tag/${slug}`;
 
@@ -215,7 +222,7 @@ export default async function TagPage({ params }) {
       />
 
       <nav style={styles.breadcrumb}>
-        <Link href="/" style={styles.crumbLink}>Home</Link>
+        <Link href="/" prefetch={false} style={styles.crumbLink}>Home</Link>
         <span style={styles.crumbSep}>›</span>
         <span style={styles.crumbCurrent}>{tag.name}</span>
       </nav>

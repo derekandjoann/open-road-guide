@@ -14,7 +14,14 @@ import { heroImage, hasHeroImage, thumbImage, hasThumbImage } from '../../../lib
 // rendering keeps prose live-instant AND still ships fully server-rendered
 // HTML plus real per-POI <title>/<meta>/Open Graph tags (via generateMetadata
 // below) that crawlers can read — which is the whole SEO win.
-export const dynamic = 'force-dynamic';
+// Pages are built on a visitor's first request, then served from the cache
+// and rebuilt in the background at most once an hour, so a database edit
+// shows up within the hour with no deploy, and the database isn't asked
+// again on every view.
+export const revalidate = 3600;
+export async function generateStaticParams() {
+  return [];
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -101,7 +108,7 @@ export async function generateMetadata({ params }) {
     poi.tagline ||
     (poi.description
       ? poi.description.slice(0, 155)
-      : `Visit ${poi.name} on a road trip through the American West.`);
+      : `Visit ${poi.name} on a road trip through ${poi.state || 'the United States'}.`);
   const url = `https://openroadguide.com/poi/${slug}`;
 
   return {
@@ -347,7 +354,7 @@ export default async function PoiDetailPage({ params }) {
     poi.meta_description ||
     poi.tagline ||
     toPlainText(poi.description || '').slice(0, 500) ||
-    `Visit ${poi.name} on a road trip through the American West.`;
+    `Visit ${poi.name} on a road trip through ${poi.state || 'the United States'}.`;
 
   const attractionLd = {
     '@context': 'https://schema.org',
