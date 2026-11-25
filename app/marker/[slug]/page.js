@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import MarkerMap from './MarkerMap';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
+import { toPlainText } from '../../../lib/plainText';
+import { parseInlineLinks } from '../../../lib/parseInlineLinks';
 
 // Render every marker page on demand (server-side) rather than statically at
 // build time, matching the POI and route pages. Marker descriptions land in
@@ -150,7 +152,7 @@ export async function generateMetadata({ params }) {
   }
 
   const title = `${marker.name} — ${marker.state} Historical Marker | Open Road Guide`;
-  const description = metaDescription(marker.description);
+  const description = metaDescription(toPlainText(marker.description));
   const url = `${BASE}/marker/${slug}`;
 
   return {
@@ -272,7 +274,7 @@ export default async function MarkerPage({ params }) {
     '@context': 'https://schema.org',
     '@type': 'TouristAttraction',
     name: marker.name,
-    description: marker.description,
+    description: toPlainText(marker.description),
     url: pageUrl,
   };
   if (hasCoords) {
@@ -349,7 +351,7 @@ export default async function MarkerPage({ params }) {
       <section style={styles.section}>
         {descriptionBlocks.map((p, i) => (
           <p key={i} style={styles.bodyText}>
-            {p}
+            {parseInlineLinks(p)}
           </p>
         ))}
       </section>

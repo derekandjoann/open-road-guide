@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
+import { snippet, toPlainText } from '../../../lib/plainText';
+import { parseInlineLinks } from '../../../lib/parseInlineLinks';
 
 // Render on demand, server-side (matching the POI, route, and marker pages).
 // Tag prose and tagged POIs land in Supabase continuously; a tag's page
@@ -102,9 +104,9 @@ export async function generateMetadata({ params }) {
     : `${tag.name} | Open Road Guide`;
   const description = (
     tag.meta_description ||
-    tag.description ||
+    snippet(tag.description, 300) ||
     `Places tagged ${tag.name} on Open Road Guide.`
-  ).slice(0, 300);
+  );
   const url = `${BASE}/tag/${slug}`;
 
   return {
@@ -197,7 +199,7 @@ export default async function TagPage({ params }) {
     name: `${tag.name} — Open Road Guide`,
     url: pageUrl,
   };
-  if (tag.description) collectionLd.description = tag.description;
+  if (tag.description) collectionLd.description = toPlainText(tag.description);
 
   const breadcrumbLd = {
     '@context': 'https://schema.org',
@@ -243,7 +245,7 @@ export default async function TagPage({ params }) {
       </header>
 
       <section style={styles.intro}>
-        <p style={styles.introText}>{intro}</p>
+        <p style={styles.introText}>{parseInlineLinks(intro)}</p>
       </section>
 
       {poiCount === 0 ? (
@@ -261,9 +263,7 @@ export default async function TagPage({ params }) {
               {grouped[hwy].map((poi) => {
                 const preview =
                   poi.tagline ||
-                  (poi.description && poi.description.length > 140
-                    ? poi.description.slice(0, 140).trim() + '…'
-                    : poi.description);
+                  (poi.description ? snippet(poi.description, 140) : null);
                 return (
                   <Link
                     key={poi.id}

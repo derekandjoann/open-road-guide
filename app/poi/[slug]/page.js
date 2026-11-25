@@ -5,6 +5,7 @@ import { toSlug } from '../../../lib/slug';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
 import PoiMap from './PoiMap';
 import { heroImage, hasHeroImage, thumbImage, hasThumbImage } from '../../../lib/images';
+import { snippet } from '../../../lib/plainText';
 
 // Render every POI on demand (server-side) rather than statically at build
 // time. This is deliberate: POI prose lives in Supabase and is edited
@@ -107,7 +108,7 @@ export async function generateMetadata({ params }) {
     poi.meta_description ||
     poi.tagline ||
     (poi.description
-      ? poi.description.slice(0, 155)
+      ? snippet(poi.description, 158)
       : `Visit ${poi.name} on a road trip through ${poi.state || 'the United States'}.`);
   const url = `https://openroadguide.com/poi/${slug}`;
 
