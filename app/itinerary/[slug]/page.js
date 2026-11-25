@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
 import { notFound } from 'next/navigation';
 import ItineraryDriveMap from '../../../components/ItineraryDriveMap';
+import MapView from '../../../components/MapView';
 import { heroImage, hasHeroImage } from '../../../lib/images';
 
 // Render every itinerary on demand (server-side) rather than statically at
@@ -198,7 +199,7 @@ export default async function ItineraryPage({ params }) {
   const driveLine = driveGeometries.length === 1 ? driveGeometries[0] : null;
 
   let driveStops = [];
-  if (driveLine && days.length > 0) {
+  if (days.length > 0) {
     const dayById = new Map(days.map((d) => [d.id, d.day_number]));
     const { data: stopRows } = await supabase
       .from('itinerary_day_pois')
@@ -218,6 +219,19 @@ export default async function ItineraryPage({ params }) {
       .filter((s) => s.day_number != null);
   }
   const showDriveMap = Boolean(driveLine) && driveStops.length >= 2;
+  // Trips stitched from several drives get a plain map of every stop instead
+  // (no line, since there's no single honest corridor to draw), so no
+  // itinerary is left without a map.
+  const stopMapPois = showDriveMap
+    ? []
+    : driveStops.map((st, i) => ({
+        id: `${st.day_number}-${st.sort_order}-${i}`,
+        name: st.name,
+        latitude: st.latitude,
+        longitude: st.longitude,
+        tagline: `Day ${st.day_number}`,
+        href: `/poi/${st.slug}`,
+      }));
 
   const stateSlug = toSlug(itin.state);
   const pageUrl = `https://openroadguide.com/itinerary/${slug}`;
@@ -350,6 +364,17 @@ export default async function ItineraryPage({ params }) {
             <p key={i} style={styles.practicalPara}>{renderRich(para)}</p>
           ))}
         </aside>
+      )}
+
+      {/* Every stop on one map, for trips without a single drive line */}
+      {!showDriveMap && stopMapPois.length >= 2 && (
+        <section style={styles.driveMapSection}>
+          <h2 style={styles.driveMapHeading}>Every stop on the map</h2>
+          <p style={styles.driveMapSub}>
+            Tap a pin to see which day it falls on and open the place.
+          </p>
+          <MapView pois={stopMapPois} markerColor="#FF6B6B" height="460px" />
+        </section>
       )}
 
       {/* The drive, animated — press play and the trip runs itself */}

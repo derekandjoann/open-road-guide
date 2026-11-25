@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
 import MapView from '../../../components/MapView';
 import { heroImage, hasHeroImage } from '../../../lib/images';
+import { snippet } from '../../../lib/plainText';
 
 // Render every route on demand (server-side) rather than statically at build
 // time, matching the POI page. Route descriptions and route_pois editorial
@@ -216,15 +217,58 @@ export default async function RoutePage({ params }) {
   // Historical markers tied to this route — roadside plaques and monuments.
   // These are texture, not stops: no individual pages, just name, note, and
   // who put them there. Rendered as a compact grid below the drive.
-  const { data: markerData } = await supabase
-    .from('route_markers')
-    .select('marker:markers(id, name, erected_by, year_erected, note, latitude, longitude)')
-    .eq('route_id', route.id);
+  // Two sources, merged: markers hand-linked in route_markers, and every
+  // marker with a page within half a mile of the traced line
+  // (markers_along_route), so each drive lists its roadside history without
+  // anyone filling route_markers by hand.
+  const [{ data: linkedRows }, { data: alongRows }] = await Promise.all([
+    supabase
+      .from('route_markers')
+      .select('marker:markers(id, name, slug, city, erected_by, year_erected, description, latitude, longitude, parked)')
+      .eq('route_id', route.id),
+    supabase.rpc('markers_along_route', { route_slug: route.slug, buffer_m: 800, max_results: 300 }),
+  ]);
+  const seenMarker = new Set();
+  const markerData = [
+    ...(linkedRows || []),
+    ...(Array.isArray(alongRows) ? alongRows : []).map((m) => ({ marker: m })),
+  ].filter((row) => {
+    const id = row.marker && row.marker.id;
+    if (!id || seenMarker.has(id)) return false;
+    seenMarker.add(id);
+    return true;
+  });
 
+  // Cards show the marker's own story (as a short plain-text teaser) and link
+  // to its page. They run in road order: each marker is placed at the nearest
+  // vertex of the traced line, so the list reads start to finish like the
+  // drive. Markers without a line fall back to name order.
+  const line = Array.isArray(route.path_geojson) ? route.path_geojson : [];
+  const lineIndex = (m) => {
+    if (line.length < 2 || typeof m.latitude !== 'number') return Infinity;
+    const cosLat = Math.cos((m.latitude * Math.PI) / 180);
+    let best = Infinity;
+    let at = Infinity;
+    for (let i = 0; i < line.length; i += 1) {
+      const v = line[i];
+      if (!Array.isArray(v)) continue;
+      const dx = (v[0] - m.longitude) * cosLat;
+      const dy = v[1] - m.latitude;
+      const d = dx * dx + dy * dy;
+      if (d < best) { best = d; at = i; }
+    }
+    return at;
+  };
   const histMarkers = (markerData || [])
     .map((m) => m.marker)
-    .filter(Boolean)
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .filter((m) => m && !m.parked)
+    .map((m) => ({
+      ...m,
+      teaser: m.description ? snippet(m.description, 200) : null,
+      hasPage: Boolean(m.slug && m.description && m.description.trim()),
+      _at: lineIndex(m),
+    }))
+    .sort((a, b) => a._at - b._at || a.name.localeCompare(b.name));
 
   // Stories that feature this drive, via the story_routes join table. This is
   // the reverse of the POI page's "Stories featuring this place" (story_pois):
@@ -529,19 +573,33 @@ export default async function RoutePage({ params }) {
         <section style={styles.markersSection}>
           <h2 style={styles.markersHeading}>Markers Along This Road</h2>
           <p style={styles.markersSub}>
-            Roadside plaques and monuments worth a pull-over — small history,
-            standing exactly where it happened.
+            Roadside history along the drive, in the order you pass it.
           </p>
           <div style={styles.markersGrid}>
             {histMarkers.map((m) => (
               <div key={m.id} style={styles.markerCard}>
-                <div style={styles.markerEyebrow}>Historical Marker</div>
-                <h3 style={styles.markerName}>{m.name}</h3>
-                {m.note && <p style={styles.markerNote}>{m.note}</p>}
+                <div style={styles.markerEyebrow}>
+                  Historical Marker{m.city ? ` · ${m.city}` : ''}
+                </div>
+                <h3 style={styles.markerName}>
+                  {m.hasPage ? (
+                    <Link href={`/marker/${m.slug}`} prefetch={false} style={{ color: 'inherit', textDecoration: 'none' }}>
+                      {m.name}
+                    </Link>
+                  ) : (
+                    m.name
+                  )}
+                </h3>
+                {m.teaser && <p style={styles.markerNote}>{m.teaser}</p>}
                 {(m.erected_by || m.year_erected) && (
                   <div style={styles.markerMeta}>
                     {[m.erected_by, m.year_erected].filter(Boolean).join(' · ')}
                   </div>
+                )}
+                {m.hasPage && (
+                  <Link href={`/marker/${m.slug}`} prefetch={false} style={{ display: 'inline-block', marginTop: '0.6rem', color: '#FF6B6B', fontWeight: 600, fontSize: '0.9rem', textDecoration: 'none' }}>
+                    Read the marker&rsquo;s story →
+                  </Link>
                 )}
               </div>
             ))}
