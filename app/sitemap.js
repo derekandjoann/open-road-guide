@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { COUNTY_INDEX_MIN } from '../lib/county';
 
 const BASE = 'https://openroadguide.com';
 
@@ -86,6 +87,20 @@ export default async function sitemap() {
     fetchAll('trails', 'slug, updated_at', published),
   ]);
 
+  // County pages with at least COUNTY_INDEX_MIN pages of their own to point
+  // to (the same rule that sets them to index in their own metadata).
+  let counties = [];
+  for (let attempt = 0; attempt < 3 && counties.length === 0; attempt++) {
+    const { data, error } = await supabase.rpc('county_directory');
+    if (error) {
+      console.error('sitemap: failed to load counties:', error.message || error);
+      continue;
+    }
+    counties = (Array.isArray(data) ? data : []).filter(
+      (c) => Number(c[5]) + Number(c[6]) >= COUNTY_INDEX_MIN
+    );
+  }
+
   // State hubs live at the top level (/utah, /nevada). High priority — they're
   // the front door for each state.
   const stateHubs = states
@@ -113,6 +128,12 @@ export default async function sitemap() {
     ...routes.filter((r) => r.slug).map(toEntry('route', 0.7, 'monthly')),
     ...regions.filter((r) => r.slug).map(toEntry('region', 0.7, 'monthly')),
     ...stories.filter((r) => r.slug).map(toEntry('story', 0.6, 'monthly')),
+    ...counties.map((c) => ({
+      url: `${BASE}/county/${c[1]}/${c[3]}`,
+      lastModified: now,
+      changeFrequency: 'weekly',
+      priority: 0.6,
+    })),
     ...markers.filter((r) => r.slug).map(toEntry('marker', 0.6, 'yearly')),
     ...tags.filter((r) => r.slug).map(toEntry('tag', 0.5, 'monthly')),
   ];
