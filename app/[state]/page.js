@@ -4,6 +4,8 @@ import MapView from '../../components/MapView';
 import MapLegend from '../../components/MapLegend';
 import { notFound } from 'next/navigation';
 import { heroImage, hasHeroImage } from '../../lib/images';
+import { shortName, highwayOrder } from '../../lib/along';
+import { TOWN_INDEX_MIN, isTownName } from '../../lib/town';
 
 // Rebuilt in the background at most once an hour, so new content appears
 // here without a manual deploy.
@@ -109,7 +111,7 @@ export default async function StateHubPage({ params }) {
 
   // Everything is scoped to this state's canonical name. Routes also include
   // any drive that crosses into this state (state = name OR name in crossings).
-  const [poiRes, regionRes, storyRes, routeRes, markerRes, itinRes, trailRes] = await Promise.all([
+  const [poiRes, regionRes, storyRes, routeRes, markerRes, itinRes, trailRes, hwyRes, townRes] = await Promise.all([
     supabase
       .from('pois')
       .select('id, name, slug, tagline, category, longitude, latitude')
@@ -153,6 +155,14 @@ export default async function StateHubPage({ params }) {
       .contains('crossing_states', [name])
       .order('featured', { ascending: false })
       .order('sort_order', { ascending: true }),
+    // Along the Way segments in this state that are indexed.
+    supabase
+      .from('highway_states')
+      .select('highway_slug, kind, num, miles, places_n, markers_n')
+      .eq('state', name)
+      .eq('indexable', true),
+    // Town pages (filtered to this state below).
+    supabase.rpc('town_directory'),
   ]);
 
   const pois = (poiRes.data || []).filter(
@@ -170,6 +180,11 @@ export default async function StateHubPage({ params }) {
 
   // The hub shows at most six stories; the rest live on the filtered index.
   const storiesToShow = stories.slice(0, 6);
+  const highways = [...(hwyRes?.data || [])].sort(highwayOrder);
+  const towns = (Array.isArray(townRes?.data) ? townRes.data : [])
+    .filter((t) => t.state === name && t.places + t.told >= TOWN_INDEX_MIN && isTownName(t.town))
+    .sort((a, b) => b.places + b.told - (a.places + a.told));
+  const townsToShow = towns.slice(0, 24);
 
   const categories = [...new Set(pois.map((p) => p.category).filter(Boolean))].sort();
 
@@ -375,6 +390,40 @@ export default async function StateHubPage({ params }) {
               <div style={{ ...styles.cardCta, color: COLORS.violet }}>Browse by county →</div>
             </div>
           </Link>
+        </section>
+      )}
+
+      {/* Highways and towns: Along the Way pages and town guides */}
+      {(highways.length > 0 || townsToShow.length > 0) && (
+        <section style={styles.section}>
+          <h2 style={styles.sectionHeading}>Highways and towns</h2>
+          <p style={styles.sectionSub}>
+            Follow a highway through {name} stop by stop, or open a town for everything in and around it.
+          </p>
+          {highways.length > 0 && (
+            <div style={{ marginBottom: '1.5rem' }}>
+              <div style={{ ...styles.cardEyebrow, color: COLORS.teal, marginBottom: '0.6rem' }}>Along the Way</div>
+              <div style={styles.chipRow}>
+                {highways.map((h) => (
+                  <Link key={h.highway_slug} href={`/along/${h.highway_slug}/${stateSlug}`} prefetch={false} style={styles.chip}>
+                    {shortName(h.highway_slug)}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+          {townsToShow.length > 0 && (
+            <div>
+              <div style={{ ...styles.cardEyebrow, color: COLORS.coral, marginBottom: '0.6rem' }}>Towns</div>
+              <div style={styles.chipRow}>
+                {townsToShow.map((t) => (
+                  <Link key={t.town_slug} href={`/town/${stateSlug}/${t.town_slug}`} prefetch={false} style={styles.chip}>
+                    {t.town}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       )}
 
@@ -663,6 +712,11 @@ const styles = {
   routeStatValue: { fontSize: '0.95rem', fontWeight: 600, color: COLORS.ink },
 
   sectionMoreWrap: { textAlign: 'center', marginTop: '1.5rem' },
+  chipRow: { display: 'flex', flexWrap: 'wrap', gap: '0.5rem' },
+  chip: {
+    background: '#fff', color: COLORS.ink, border: '1.5px solid #e2e2e2', borderRadius: '999px',
+    padding: '0.4rem 0.9rem', fontWeight: 600, fontSize: '0.9rem', textDecoration: 'none',
+  },
   sectionMoreLink: { color: COLORS.coral, textDecoration: 'none', fontWeight: 600, fontSize: '0.95rem' },
 
   backWrap: { borderTop: '1px solid #ececec', paddingTop: '2rem', textAlign: 'center' },
