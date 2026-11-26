@@ -100,7 +100,7 @@ export default function MapPage() {
         // One server-side call assembles all seven overlays. The browser never
         // holds a database credential; this route can only ever return these
         // columns, and the CDN caches it so scale costs nothing.
-        const res = await fetch('/api/data?kind=map');
+        const res = await fetch('/api/map-data');
         if (!res.ok) throw new Error('map-data ' + res.status);
         const payload = await res.json();
         if (cancelled) return;
