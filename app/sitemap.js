@@ -102,6 +102,20 @@ export default async function sitemap() {
     );
   }
 
+  // Along the Way: highway segments flagged indexable when their lines were
+  // loaded (ALONG_INDEX_MIN in lib/along.js), and each highway with one.
+  let alongSegs = [];
+  for (let attempt = 0; attempt < 3 && alongSegs.length === 0; attempt++) {
+    const { data, error } = await supabase.rpc('highway_directory');
+    if (error) {
+      console.error('sitemap: failed to load highways:', error.message || error);
+      continue;
+    }
+    alongSegs = (Array.isArray(data) ? data : []).filter((s) => s.indexable);
+    if (!data || data.length === 0) break;
+  }
+  const alongHighways = [...new Set(alongSegs.map((s) => s.highway_slug))];
+
   // State hubs live at the top level (/utah, /nevada). High priority — they're
   // the front door for each state.
   const stateHubs = states
@@ -134,6 +148,14 @@ export default async function sitemap() {
       lastModified: now,
       changeFrequency: 'weekly',
       priority: 0.6,
+    })),
+    ...(alongSegs.length ? [{ url: `${BASE}/along`, lastModified: now, changeFrequency: 'weekly', priority: 0.8 }] : []),
+    ...alongHighways.map((h) => ({ url: `${BASE}/along/${h}`, lastModified: now, changeFrequency: 'monthly', priority: 0.7 })),
+    ...alongSegs.map((s) => ({
+      url: `${BASE}/along/${s.highway_slug}/${s.state_slug}`,
+      lastModified: s.updated_at ? new Date(s.updated_at) : now,
+      changeFrequency: 'weekly',
+      priority: 0.7,
     })),
     ...markers.filter((r) => r.slug).map(toEntry('marker', 0.6, 'yearly')),
     ...tags.filter((r) => r.slug).map(toEntry('tag', 0.5, 'monthly')),

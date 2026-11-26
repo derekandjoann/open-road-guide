@@ -453,6 +453,13 @@ export default function PlanClient() {
             Trips save on this device, with no account. Send one to someone with a link, open it in Google Maps or Apple Maps,
             download a GPX file for a GPS, or print it.
           </p>
+          <p style={{ margin: '0.5rem 0 0' }}>
+            Or browse a highway state by state:{' '}
+            <Link href="/along" prefetch={false} style={{ color: COLORS.coral, fontWeight: 600 }}>
+              Along the Way
+            </Link>
+            .
+          </p>
         </section>
       )}
 
