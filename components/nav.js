@@ -153,10 +153,17 @@ function StateSwitcher({ states, currentSlug, theme }) {
   );
 }
 
+const mobileRow = { display: 'flex', alignItems: 'center', gap: '20px', minWidth: 0, maxWidth: '100%', flex: '1 1 100%' };
+const mobileScroll = {
+  flex: '1 1 auto', minWidth: 0, overflowX: 'auto', flexWrap: 'nowrap', gap: '22px',
+  WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none',
+};
+
 export default function Nav() {
   const pathname = usePathname();
   const [isMobile, setIsMobile] = useState(false);
   const [states, setStates] = useState([]);
+  const scrollRef = useRef(null);
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
@@ -187,6 +194,14 @@ export default function Nav() {
     return () => { active = false; };
   }, []);
 
+  // On phones, bring the current section's link into view in the scrolling row.
+  useEffect(() => {
+    const row = scrollRef.current;
+    if (!isMobile || !row) return;
+    const active = row.querySelector('[data-active="true"]');
+    if (active) row.scrollLeft = Math.max(0, active.offsetLeft - row.clientWidth / 2 + active.clientWidth / 2);
+  }, [isMobile, pathname]);
+
   // Desktop + explore: the explore page draws its own consolidated dark bar.
   if (!isMobile && pathname === '/explore') return null;
 
@@ -195,24 +210,41 @@ export default function Nav() {
   const firstSeg = (pathname || '/').split('/')[1] || '';
   const currentSlug = states.some((st) => st.slug === firstSeg) ? firstSeg : '';
 
+  const linkItems = navLinks.map((link) => {
+    const isActive = isNavLinkActive(pathname, link.href);
+    return (
+      <li key={link.href} data-active={isActive ? 'true' : undefined} style={{ flex: '0 0 auto' }}>
+        <Link href={link.href} prefetch={false} style={{ ...(isActive ? s.linkActive : s.link), whiteSpace: 'nowrap', ...(isMobile ? { display: 'inline-block' } : null) }}>
+          {link.label}
+        </Link>
+      </li>
+    );
+  });
+
   return (
     <nav style={s.nav}>
       <Link href="/" prefetch={false} style={s.logo}>
         Open Road Guide
       </Link>
-      <ul style={s.links}>
-        <StateSwitcher states={states} currentSlug={currentSlug} theme={s} />
-        {navLinks.map((link) => {
-          const isActive = isNavLinkActive(pathname, link.href);
-          return (
-            <li key={link.href}>
-              <Link href={link.href} prefetch={false} style={isActive ? s.linkActive : s.link}>
-                {link.label}
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
+      {isMobile ? (
+        // Phones: the section links are wider than the screen, so they scroll
+        // sideways in their own row (the State picker stays put on the left,
+        // where its dropdown can't be clipped). Without this the whole page
+        // was wider than the phone and Safari zoomed it out.
+        <div style={mobileRow}>
+          <ul style={{ ...s.links, flex: '0 0 auto' }}>
+            <StateSwitcher states={states} currentSlug={currentSlug} theme={s} />
+          </ul>
+          <ul ref={scrollRef} style={{ ...s.links, ...mobileScroll }}>
+            {linkItems}
+          </ul>
+        </div>
+      ) : (
+        <ul style={s.links}>
+          <StateSwitcher states={states} currentSlug={currentSlug} theme={s} />
+          {linkItems}
+        </ul>
+      )}
     </nav>
   );
 }

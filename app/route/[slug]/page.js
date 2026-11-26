@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import MapView from '../../../components/MapView';
 import { heroImage, hasHeroImage } from '../../../lib/images';
 import { snippet } from '../../../lib/plainText';
+import { planHref } from '../../../lib/trip';
+import MakeTripMine from '../../../components/MakeTripMine';
 
 // Render every route on demand (server-side) rather than statically at build
 // time, matching the POI page. Route descriptions and route_pois editorial
@@ -321,6 +323,15 @@ export default async function RoutePage({ params }) {
       : null,
   }));
 
+  // Chart My Course link with this drive's stops (from the first point of the
+  // traced line to the last, or first stop to last when there's no line).
+  const tripHref = planHref({
+    line: hasRouteLine ? route.path_geojson : null,
+    startLabel: route.start_location,
+    endLabel: route.end_location,
+    stops,
+  });
+
   const detourCount = stopsOnPage.filter(
     (s) => s.off_mi != null && s.off_mi >= DETOUR_MIN_MILES
   ).length;
@@ -526,6 +537,8 @@ export default async function RoutePage({ params }) {
             </>
           )}
         </p>
+
+        <MakeTripMine href={tripHref} />
 
         <ol style={styles.stopsList}>
           {stopsOnPage.map((stop, idx) => {
