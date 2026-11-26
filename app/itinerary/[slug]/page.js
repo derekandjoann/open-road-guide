@@ -4,6 +4,8 @@ import { notFound } from 'next/navigation';
 import ItineraryDriveMap from '../../../components/ItineraryDriveMap';
 import MapView from '../../../components/MapView';
 import { heroImage, hasHeroImage } from '../../../lib/images';
+import { planHref } from '../../../lib/trip';
+import MakeTripMine from '../../../components/MakeTripMine';
 
 // Render every itinerary on demand (server-side) rather than statically at
 // build time — same rationale as the POI and marker pages: the prose lives in
@@ -233,6 +235,11 @@ export default async function ItineraryPage({ params }) {
         href: `/poi/${st.slug}`,
       }));
 
+  // Chart My Course link: every stop in day order, first stop to last.
+  const tripHref = planHref({
+    stops: [...driveStops].sort((a, b) => a.day_number - b.day_number || a.sort_order - b.sort_order),
+  });
+
   const stateSlug = toSlug(itin.state);
   const pageUrl = `https://openroadguide.com/itinerary/${slug}`;
 
@@ -397,6 +404,7 @@ export default async function ItineraryPage({ params }) {
       )}
 
       {/* The days */}
+      <MakeTripMine href={tripHref} note="All the stops, first to last. Change them, split the days your way, then save, share or send to your maps app." />
       <section style={styles.daysSection}>
         {days.map((d) => {
           const meta = [
