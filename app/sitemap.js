@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { COUNTY_INDEX_MIN } from '../lib/county';
+import { TOWN_INDEX_MIN, isTownName } from '../lib/town';
 
 const BASE = 'https://openroadguide.com';
 
@@ -116,6 +117,18 @@ export default async function sitemap() {
   }
   const alongHighways = [...new Set(alongSegs.map((s) => s.highway_slug))];
 
+  // Town pages with at least TOWN_INDEX_MIN stops (same rule as their metadata).
+  let towns = [];
+  for (let attempt = 0; attempt < 3 && towns.length === 0; attempt++) {
+    const { data, error } = await supabase.rpc('town_directory');
+    if (error) {
+      console.error('sitemap: failed to load towns:', error.message || error);
+      continue;
+    }
+    towns = (Array.isArray(data) ? data : []).filter((t) => t.places + t.told >= TOWN_INDEX_MIN && isTownName(t.town));
+    if (!data || data.length === 0) break;
+  }
+
   // State hubs live at the top level (/utah, /nevada). High priority — they're
   // the front door for each state.
   const stateHubs = states
@@ -157,6 +170,7 @@ export default async function sitemap() {
       changeFrequency: 'weekly',
       priority: 0.7,
     })),
+    ...towns.map((t) => ({ url: `${BASE}/town/${t.state_slug}/${t.town_slug}`, lastModified: now, changeFrequency: 'weekly', priority: 0.6 })),
     ...markers.filter((r) => r.slug).map(toEntry('marker', 0.6, 'yearly')),
     ...tags.filter((r) => r.slug).map(toEntry('tag', 0.5, 'monthly')),
   ];

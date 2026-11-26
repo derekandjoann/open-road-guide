@@ -6,6 +6,7 @@ import MapView from '../../../../components/MapView';
 import { thumbImage } from '../../../../lib/images';
 import { snippet } from '../../../../lib/plainText';
 import { countyLabel, COUNTY_INDEX_MIN } from '../../../../lib/county';
+import { townSlug, TOWN_PAGE_MIN } from '../../../../lib/town';
 
 // County pages: /county/<state>/<county>, e.g. /county/texas/travis.
 // Every place and historical marker in one county, with a map. Built on a
@@ -92,6 +93,18 @@ export default async function CountyPage({ params }) {
   }
   const towns = [...townCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
 
+  // Towns with a page of their own (at least TOWN_PAGE_MIN places and told
+  // markers in this county alone, so the link never lands on a 404).
+  const ownPages = new Map();
+  for (const x of [...places.map((p) => p.nearest_city), ...told.map((m) => m.city)]) {
+    const k = townSlug(x);
+    if (k) ownPages.set(k, (ownPages.get(k) || 0) + 1);
+  }
+  const townHref = (t) => {
+    const k = townSlug(t);
+    return k && (ownPages.get(k) || 0) >= TOWN_PAGE_MIN ? `/town/${state}/${k}` : null;
+  };
+
   const mapPois = places
     .filter((p) => p.latitude != null)
     .map((p) => ({
@@ -165,7 +178,10 @@ export default async function CountyPage({ params }) {
           <div style={styles.towns}>
             Towns: {towns.map(([t, n], i) => (
               <span key={t}>
-                {i > 0 ? ', ' : ''}{t} ({n})
+                {i > 0 ? ', ' : ''}
+                {townHref(t) ? (
+                  <Link href={townHref(t)} prefetch={false} style={{ color: COLORS.coral, textDecoration: 'none', fontWeight: 600 }}>{t}</Link>
+                ) : t}{' '}({n})
               </span>
             ))}
           </div>
