@@ -558,6 +558,9 @@ export default function PlanClient() {
             )}
 
             <div className="no-print" style={styles.actions}>
+              <Link href={`/drive?${tripToQuery(trip)}`} prefetch={false} style={{ ...styles.btn, textDecoration: 'none', background: '#FF6B6B', color: '#1a1a2e' }}>
+                Drive it →
+              </Link>
               <button type="button" onClick={saveTrip} style={styles.btn}>
                 Save on this device
               </button>
