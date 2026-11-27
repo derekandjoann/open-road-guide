@@ -4,6 +4,7 @@ import MarkerMap from './MarkerMap';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
 import { toPlainText } from '../../../lib/plainText';
+import ListenButton from '../../../components/ListenButton';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
 import { countyHref, countyLabel } from '../../../lib/county';
 
@@ -356,6 +357,15 @@ export default async function MarkerPage({ params }) {
           </Link>
         </div>
         {erectedText && <div style={styles.erectedLine}>{erectedText}</div>}
+        <ListenButton
+          parts={[
+            marker.name,
+            toPlainText(marker.description),
+            marker.inscription
+              ? `The marker reads: ${marker.inscription.replace(/\[[^\]]*\]/g, ' ')}`
+              : '',
+          ]}
+        />
       </header>
 
       {/* The editorial description — the reason this page exists */}
