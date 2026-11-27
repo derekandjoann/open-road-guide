@@ -1,5 +1,5 @@
 import { supabase } from '../../../lib/supabase';
-import { fetchAll } from '../../../lib/fetchAll';
+import { getMapData } from '../../../lib/mapData';
 
 // One server-side data route for everything the interactive pages need.
 //
@@ -8,7 +8,7 @@ import { fetchAll } from '../../../lib/fetchAll';
 // (app/api/data/) with no brackets or dots in the name, which iOS Smart
 // Punctuation silently rewrites.
 //
-//   /api/data?kind=map                  → every overlay the /map page draws
+//   /api/data?kind=map                  → every overlay the /map page draws (old path; see /api/map-data)
 //   /api/data?kind=nearme&lat=&lng=     → 8 nearest published POIs
 //   /api/data?kind=search&q=            → POI search
 //   /api/data?kind=marker&id=<uuid>     → one marker's long text
@@ -46,33 +46,9 @@ export async function GET(request) {
 
   // ---------------------------------------------------------------- map
   if (kind === 'map') {
-    // Every list is read in pages: the database returns at most 1,000 rows
-    // per request, and places, region links and story links are past that.
-    const all = (build) =>
-      fetchAll(build).then((data) => ({ data, error: null })).catch((error) => ({ data: [], error }));
-    const [poiR, routeR, regionR, regionPoiR, storyR, storyPoiR] = await Promise.all([
-      all((f, t) => supabase.from('pois').select('id,slug,name,latitude,longitude,category,tagline,thumbnail_url,thumbnail_public_id').eq('published', true).order('id').range(f, t)),
-      all((f, t) => supabase.from('routes').select('slug,name,total_miles,short_description,path_geojson').eq('published', true).order('slug').range(f, t)),
-      all((f, t) => supabase.from('regions').select('id,slug,name,short_description,bounds').eq('published', true).order('id').range(f, t)),
-      all((f, t) => supabase.from('region_pois').select('region_id,poi_id').order('region_id').order('poi_id').range(f, t)),
-      all((f, t) => supabase.from('stories').select('id,slug,title,story_type,excerpt').eq('published', true).order('id').range(f, t)),
-      all((f, t) => supabase.from('story_pois').select('story_id,poi_id,sort_order').order('story_id').order('poi_id').range(f, t)),
-    ]);
-
-    // POIs are the spine — without them nothing else can be placed.
-    if (poiR.error) return json({ error: 'map data unavailable' }, 503);
-
-    // Same defensive contract as before: one failed overlay never blanks the rest.
-    return json(
-      {
-        pois: poiR.data || [],
-        routes: routeR.error ? [] : routeR.data || [],
-        regions: regionR.error ? [] : regionR.data || [],
-        regionPois: regionPoiR.error ? [] : regionPoiR.data || [],
-        stories: storyR.error ? [] : storyR.data || [],
-        storyPois: storyPoiR.error ? [] : storyPoiR.data || [],
-      },
-      200);
+    // Kept for old cached pages; /map now reads /api/map-data (CDN-cached).
+    const d = await getMapData();
+    return d ? json(d, 200) : json({ error: 'map data unavailable' }, 503);
   }
 
   // ------------------------------------------------------------- nearme
