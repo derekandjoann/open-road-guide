@@ -6,6 +6,14 @@ import Footer from '../components/footer';
 export const metadata = {
   title: 'Open Road Guide — Road Trip Guides, State by State',
   description: 'Your road trip companion, state by state: interactive maps, scenic drives, regional guides, and the roadside history worth pulling over for.',
+  applicationName: 'Open Road Guide',
+  // Home-screen app on iPhone and iPad: full-screen, with this title under the icon.
+  appleWebApp: { capable: true, title: 'Open Road', statusBarStyle: 'default' },
+};
+
+// Colors the phone's status bar and the installed app's title bar.
+export const viewport = {
+  themeColor: '#1a1a2e',
 };
 
 // Site-wide structured data: Organization (who publishes this) and WebSite
