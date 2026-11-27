@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { getCategoryColor, getCategoryEmoji } from '../../../lib/categoryColors';
 import { toSlug } from '../../../lib/slug';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
+import ListenButton from '../../../components/ListenButton';
 import PoiMap from './PoiMap';
 import { heroImage, hasHeroImage, thumbImage, hasThumbImage } from '../../../lib/images';
 import { snippet } from '../../../lib/plainText';
@@ -727,6 +728,17 @@ export default async function PoiDetailPage({ params }) {
         margin: '0 auto',
         padding: '0 20px',
       }}>
+
+        <div style={{ margin: '0 0 24px' }}>
+          <ListenButton
+            parts={[
+              poi.name,
+              poi.tagline || '',
+              toPlainText(poi.description || ''),
+              poi.fun_fact ? `Did you know? ${toPlainText(poi.fun_fact)}` : '',
+            ]}
+          />
+        </div>
 
         {poi.fun_fact && (
           <div style={{

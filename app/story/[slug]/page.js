@@ -2,6 +2,8 @@ import Link from 'next/link';
 import MileMarkersSignup from '../../../components/MileMarkersSignup';
 import { createClient } from '@supabase/supabase-js';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
+import ListenButton from '../../../components/ListenButton';
+import { toPlainText } from '../../../lib/plainText';
 import { heroImage, hasHeroImage } from '../../../lib/images';
 
 // Rebuilt in the background at most once an hour, so new content appears
@@ -264,6 +266,7 @@ export default async function StoryPage({ params }) {
           {story.excerpt && (
             <p style={styles.excerpt}>{story.excerpt}</p>
           )}
+          <ListenButton parts={[story.title, story.subtitle || '', toPlainText(story.body || '')]} />
 
           {/* Byline row */}
           <div style={styles.byline}>
