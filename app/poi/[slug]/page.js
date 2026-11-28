@@ -425,32 +425,6 @@ export default async function PoiDetailPage({ params }) {
         dangerouslySetInnerHTML={{ __html: jsonLdHtml }}
       />
 
-      {/* Top nav */}
-      <nav style={{
-        background: '#1a1a2e',
-        padding: '14px 20px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: '10px',
-      }}>
-        <a href="/" style={{
-          textDecoration: 'none',
-          fontFamily: "'Fraunces', serif",
-          fontSize: 'clamp(17px, 4vw, 20px)',
-          fontWeight: 800,
-          color: '#ff6b5b',
-        }}>Open Road Guide</a>
-        <div style={{ display: 'flex', gap: '20px' }}>
-          <a href="/explore" style={{
-            color: 'rgba(255,255,255,0.7)',
-            textDecoration: 'none',
-            fontSize: '14px',
-            fontWeight: 500,
-          }}>Explore Map</a>
-        </div>
-      </nav>
 
       {/* Breadcrumb */}
       <div style={{
