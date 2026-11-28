@@ -5,6 +5,7 @@ import { heroImage, hasHeroImage } from '../../../lib/images';
 import { snippet } from '../../../lib/plainText';
 import { planHref } from '../../../lib/trip';
 import MakeTripMine from '../../../components/MakeTripMine';
+import InArticleAd from '../../../components/InArticleAd';
 
 // Render every route on demand (server-side) rather than statically at build
 // time, matching the POI page. Route descriptions and route_pois editorial
@@ -523,6 +524,8 @@ export default async function RoutePage({ params }) {
         </section>
       )}
 
+      <InArticleAd style={{ maxWidth: '46rem', margin: '0 0 3rem' }} />
+
       {/* Stops along the route */}
       <section style={styles.stopsSection}>
         <h2 style={styles.stopsHeading}>The Drive, Stop by Stop</h2>
@@ -580,6 +583,8 @@ export default async function RoutePage({ params }) {
           })}
         </ol>
       </section>
+
+      <InArticleAd style={{ maxWidth: '46rem', margin: '0 0 3rem' }} />
 
       {/* Historical markers along the corridor */}
       {histMarkers.length > 0 && (

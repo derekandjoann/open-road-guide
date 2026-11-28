@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import { cache } from 'react';
 import { toPlainText } from '../../../lib/plainText';
 import ListenButton from '../../../components/ListenButton';
+import InArticleAd from '../../../components/InArticleAd';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
 import { countyHref, countyLabel } from '../../../lib/county';
 
@@ -385,6 +386,8 @@ export default async function MarkerPage({ params }) {
         </section>
       )}
 
+      <InArticleAd />
+
       {/* Map */}
       {hasCoords && (
         <section style={styles.section}>
@@ -447,6 +450,8 @@ export default async function MarkerPage({ params }) {
           </ul>
         </section>
       )}
+
+      <InArticleAd />
 
       {/* Source credit */}
       {marker.source_url && (

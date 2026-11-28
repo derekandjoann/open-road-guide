@@ -1,9 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import { notFound } from 'next/navigation';
+import { Fragment } from 'react';
 import { getCategoryColor, getCategoryEmoji } from '../../../lib/categoryColors';
 import { toSlug } from '../../../lib/slug';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
 import ListenButton from '../../../components/ListenButton';
+import InArticleAd from '../../../components/InArticleAd';
 import PoiMap from './PoiMap';
 import { heroImage, hasHeroImage, thumbImage, hasThumbImage } from '../../../lib/images';
 import { snippet } from '../../../lib/plainText';
@@ -832,10 +834,14 @@ export default async function PoiDetailPage({ params }) {
                     </h2>
                   );
                 }
+                // One in-article ad after the 2nd paragraph of a longer story.
+                const paraNo = descriptionBlocks.slice(0, i + 1).filter((b) => !b.startsWith('## ') && !b.startsWith('### ')).length;
+                const adHere = paraNo === 2 && descriptionBlocks.length >= 4 && !descriptionBlocks[i].startsWith('#');
                 return (
-                  <p key={i} style={{ margin: '0 0 1.2em 0' }}>
-                    {parseInlineLinks(block)}
-                  </p>
+                  <Fragment key={i}>
+                    <p style={{ margin: '0 0 1.2em 0' }}>{parseInlineLinks(block)}</p>
+                    {adHere && <InArticleAd />}
+                  </Fragment>
                 );
               })}
             </div>
@@ -1035,6 +1041,8 @@ export default async function PoiDetailPage({ params }) {
             </div>
           </section>
         )}
+
+        <InArticleAd />
 
         {relatedPois.length > 0 && (
           <section style={{ marginTop: '48px', marginBottom: '60px' }}>

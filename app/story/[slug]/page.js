@@ -1,8 +1,10 @@
 import Link from 'next/link';
+import { Fragment } from 'react';
 import MileMarkersSignup from '../../../components/MileMarkersSignup';
 import { createClient } from '@supabase/supabase-js';
 import { parseInlineLinks } from '../../../lib/parseInlineLinks';
 import ListenButton from '../../../components/ListenButton';
+import InArticleAd from '../../../components/InArticleAd';
 import { toPlainText } from '../../../lib/plainText';
 import { heroImage, hasHeroImage } from '../../../lib/images';
 
@@ -307,14 +309,20 @@ export default async function StoryPage({ params }) {
                   </h2>
                 );
               }
+              // In-article ads: after the 3rd paragraph, then every 7th,
+              // never after the story's last paragraph (one follows the article).
+              const paraNo = blocks.slice(0, i + 1).filter((b) => !b.startsWith('## ') && !b.startsWith('### ')).length;
+              const adHere = (paraNo === 3 || (paraNo > 3 && (paraNo - 3) % 7 === 0)) && i < blocks.length - 2;
               return (
-                <p key={i} style={styles.bodyPara}>
-                  {parseInlineLinks(block)}
-                </p>
+                <Fragment key={i}>
+                  <p style={styles.bodyPara}>{parseInlineLinks(block)}</p>
+                  {adHere && <InArticleAd />}
+                </Fragment>
               );
             })}
           </article>
         )}
+        {blocks.length > 0 && <InArticleAd />}
 
         {/* Related POIs */}
         {relatedPois.length > 0 && (
