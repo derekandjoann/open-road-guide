@@ -1,3 +1,4 @@
+import AdSenseLoader from '../components/AdSenseLoader';
 import './globals.css';
 import Script from 'next/script';
 import Nav from '../components/nav';
@@ -54,14 +55,10 @@ export default function RootLayout({ children }) {
           href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
           rel="stylesheet"
         />
-        {/* Google AdSense (site verification + ads). A plain script tag, not
-            next/script, so it ships in the server-rendered <head> where
-            AdSense's verification crawler looks for it. */}
-        <script
-          async
-          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5630628197846834"
-          crossOrigin="anonymous"
-        />
+        {/* Google AdSense: the account tag (lets AdSense's crawler confirm the
+            site; it loads no ads by itself). Ads load only on reading pages,
+            through <AdSenseLoader /> (rules in lib/ads.js). */}
+        <meta name="google-adsense-account" content="ca-pub-5630628197846834" />
         {/* Structured data for search engines (read from the server-rendered HTML) */}
         <script
           type="application/ld+json"
@@ -72,6 +69,7 @@ export default function RootLayout({ children }) {
         <Nav />
         {children}
         <Footer />
+        <AdSenseLoader />
 
         {/* Google Analytics (gtag.js) */}
         <Script
