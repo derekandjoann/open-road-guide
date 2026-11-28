@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { queryToTrip, routePoints, pointsParam, tripToQuery, tripTitle, stopKey } from '../../lib/trip';
+import { offlineSupported, registerOffline, packId, listPacks, savePack, removePack, fmtBytes } from '../../lib/offline';
 
 // Drive Mode: the road ahead. Opened from a Chart My Course trip
 // (/drive?<same query as /plan>). Follows the phone's location along the
@@ -82,6 +83,13 @@ export default function DriveClient() {
   const [gpsNote, setGpsNote] = useState('');
   const [announce, setAnnounce] = useState(false);
   const [showMarkers, setShowMarkers] = useState(true);
+  const [apiUrls, setApiUrls] = useState([]);
+  const [online, setOnline] = useState(true);
+  const [canSave, setCanSave] = useState(false);
+  const [pack, setPack] = useState(null); // this trip's saved copy, if any
+  const [packs, setPacks] = useState([]);
+  const [saving, setSaving] = useState(null); // [done, total]
+  const [packNote, setPackNote] = useState('');
   const announced = useRef(new Set());
   const wakeLock = useRef(null);
 
@@ -90,19 +98,26 @@ export default function DriveClient() {
     const t = queryToTrip(window.location.search);
     if (!t.from || !t.to) {
       setError('Open Drive Mode from a trip in Chart My Course.');
+      if (offlineSupported()) listPacks().then(setPacks);
       return;
     }
     setTrip(t);
     (async () => {
       try {
         let stops = [];
+        const used = [];
         if (t.stopKeys.length) {
-          const r = await fetch(`/api/course?resolve=${encodeURIComponent(t.stopKeys.join(','))}`);
+          const ru = `/api/course?resolve=${encodeURIComponent(t.stopKeys.join(','))}`;
+          used.push(ru);
+          const r = await fetch(ru);
           stops = (await r.json()).stops || [];
         }
         setChosen(stops);
         const pts = routePoints({ ...t, stops });
-        const res = await fetch(`/api/course?pts=${encodeURIComponent(pointsParam(pts))}`);
+        const cu = `/api/course?pts=${encodeURIComponent(pointsParam(pts))}`;
+        used.push(cu);
+        setApiUrls(used);
+        const res = await fetch(cu);
         const d = await res.json();
         if (!res.ok) throw new Error(d.error || 'route');
         setCourse(d);
@@ -129,6 +144,23 @@ export default function DriveClient() {
     );
     return () => navigator.geolocation.clearWatch(id);
   }, [course]);
+
+  // Offline trips: the service worker, whether this trip is saved, and signal.
+  useEffect(() => {
+    if (!offlineSupported()) return undefined;
+    setCanSave(true);
+    registerOffline();
+    const id = packId(window.location.search);
+    listPacks().then((list) => setPack(list.find((p) => p.id === id) || null));
+    const sync = () => setOnline(navigator.onLine);
+    sync();
+    window.addEventListener('online', sync);
+    window.addEventListener('offline', sync);
+    return () => {
+      window.removeEventListener('online', sync);
+      window.removeEventListener('offline', sync);
+    };
+  }, []);
 
   // Keep the screen on while driving, where the browser allows it.
   useEffect(() => {
@@ -172,6 +204,31 @@ export default function DriveClient() {
     return { P, pline, cum, total: cum[cum.length - 1], items };
   }, [course, chosen]);
 
+  async function savePackNow() {
+    if (!geo || saving) return;
+    setPackNote('');
+    const search = window.location.search;
+    const pages = [...new Set(geo.items.map((t) => (t.kind === 'marker' ? `/marker/${t.slug}` : `/poi/${t.slug}`)))];
+    setSaving([0, pages.length + apiUrls.length + 1]);
+    try {
+      const entry = await savePack(
+        { id: packId(search), title: trip ? tripTitle(trip) : 'Saved trip', url: `/drive${search}`, api: apiUrls, pages },
+        (done, total) => setSaving([done, total])
+      );
+      setPack(entry);
+      if (entry.failed) setPackNote(`${entry.failed} pages couldn’t be saved; tap Update with better signal.`);
+    } catch {
+      setPackNote('The trip couldn’t be saved. Check your signal and try again.');
+    }
+    setSaving(null);
+  }
+
+  async function removePackNow() {
+    await removePack(packId(window.location.search));
+    setPack(null);
+    setPackNote('');
+  }
+
   const here = useMemo(() => (geo && pos ? locate(geo.pline, geo.cum, geo.P(pos)) : null), [geo, pos]);
   const offRoute = here && here.off > OFF_ROUTE_M;
   const at = here ? here.along : 0;
@@ -210,6 +267,20 @@ export default function DriveClient() {
         <h1 style={s.h1}>Drive Mode</h1>
         <p style={s.dim}>{error}</p>
         <Link href="/plan" style={s.link}>Chart My Course →</Link>
+        {packs.length > 0 && (
+          <section style={{ marginTop: '1.5rem' }}>
+            <div style={s.label}>Saved for no signal</div>
+            <div style={s.list}>
+              {packs.map((p) => (
+                <a key={p.id} href={p.url} style={s.item}>
+                  <span style={{ ...s.dot, background: C.teal }} />
+                  <span style={s.itemName}>{p.title}</span>
+                  <span style={{ ...s.footLbl, flex: '0 0 auto' }}>{p.pages} pages</span>
+                </a>
+              ))}
+            </div>
+          </section>
+        )}
       </main>
     );
   }
@@ -226,6 +297,11 @@ export default function DriveClient() {
         </Link>
       </div>
 
+      {!online && (
+        <div style={s.note}>
+          {pack ? 'No signal. Using the copy of this trip saved on your phone; location still works.' : 'No signal. This trip isn’t saved on your phone, so pages may not open.'}
+        </div>
+      )}
       {!course && <p style={s.dim}>Loading the road…</p>}
       {gpsNote && <div style={s.note}>{gpsNote}</div>}
       {offRoute && <div style={s.note}>You’re {fmtMi(here.off)} off this trip’s road. The countdown resumes when you rejoin it.</div>}
@@ -266,7 +342,7 @@ export default function DriveClient() {
           <div style={s.label}>Then</div>
           <div style={s.list}>
             {then.map((t) => (
-              <Link key={stopKey(t)} href={t.kind === 'marker' ? `/marker/${t.slug}` : `/poi/${t.slug}`} style={s.item}>
+              <Link key={stopKey(t)} href={t.kind === 'marker' ? `/marker/${t.slug}` : `/poi/${t.slug}`} prefetch={false} style={s.item}>
                 <span style={{ ...s.dot, background: t.mine ? C.yellow : t.kind === 'marker' ? C.violet : C.coral }} />
                 <span style={s.itemName}>{t.name}</span>
                 <span style={s.itemMi}>{pos ? fmtMi(t.toGo) : `mi ${Math.round(t.along / M_PER_MI)}`}</span>
@@ -301,6 +377,44 @@ export default function DriveClient() {
           </button>
         </div>
       )}
+      {course && canSave && (
+        <section style={s.packCard}>
+          <div style={s.label}>No signal ahead?</div>
+          {saving ? (
+            <>
+              <div style={s.packLine}>Saving… {saving[0]} of {saving[1]}</div>
+              <div style={s.bar}><div style={{ ...s.barFill, width: `${Math.round((100 * saving[0]) / saving[1])}%` }} /></div>
+            </>
+          ) : pack ? (
+            <>
+              <div style={s.packLine}>✓ Saved on this phone</div>
+              <div style={s.dim}>
+                {pack.pages} stop pages · {fmtBytes(pack.bytes)} · {new Date(pack.saved).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+              </div>
+              {online && (
+                <div style={s.row}>
+                  <button type="button" onClick={savePackNow} style={s.toggle}>Update</button>
+                  <button type="button" onClick={removePackNow} style={s.toggle}>Remove</button>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div style={s.dim}>
+                Save this trip’s road and its {geo ? geo.items.length : ''} stop pages on your phone, so the countdown and the stories keep working where there’s no signal. Photos and maps still need signal.
+              </div>
+              <div style={s.row}>
+                <button type="button" onClick={savePackNow} disabled={!online} style={{ ...s.btn, border: 'none', cursor: 'pointer', fontFamily: FONT, opacity: online ? 1 : 0.5 }}>⬇ Save for no signal</button>
+              </div>
+            </>
+          )}
+          {packNote && <div style={{ ...s.dim, marginTop: '0.6rem' }}>{packNote}</div>}
+          <div style={{ ...s.dim, fontSize: '0.8rem', marginTop: '0.6rem' }}>
+            On iPhone, add Open Road Guide to your Home Screen (Share, Add to Home Screen) so Safari keeps saved trips.
+          </div>
+        </section>
+      )}
+
       <p style={{ ...s.dim, fontSize: '0.8rem', marginTop: '1.5rem' }}>
         Keep your eyes on the road: set up before you drive, and let a passenger tap. Miles are along this trip’s road, not exits or mileposts.
       </p>
@@ -333,6 +447,10 @@ const s = {
   footer: { display: 'flex', gap: '2rem', marginTop: '1.4rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.12)' },
   footNum: { fontFamily: SERIF, fontSize: '1.6rem', fontWeight: 600 },
   footLbl: { fontSize: '0.8rem', color: C.dim },
+  packCard: { background: C.card, borderRadius: '16px', padding: '1rem 1.1rem', marginTop: '1.4rem', borderLeft: '6px solid ' + C.teal },
+  packLine: { fontWeight: 700, fontSize: '1.05rem', marginBottom: '0.3rem' },
+  bar: { height: '8px', background: 'rgba(255,255,255,0.12)', borderRadius: '999px', overflow: 'hidden', marginTop: '0.5rem' },
+  barFill: { height: '100%', background: C.teal, transition: 'width 0.2s' },
   toggle: { background: 'transparent', color: C.ink, border: '1.5px solid rgba(255,255,255,0.3)', borderRadius: '999px', padding: '0.55rem 1rem', fontWeight: 600, cursor: 'pointer', fontFamily: FONT },
   toggleOn: { background: C.teal, color: '#12121f', border: '1.5px solid ' + C.teal, borderRadius: '999px', padding: '0.55rem 1rem', fontWeight: 700, cursor: 'pointer', fontFamily: FONT },
 };
